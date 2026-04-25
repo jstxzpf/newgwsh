@@ -54,6 +54,33 @@ async def heartbeat_document_lock(doc_id: str, lock_token: str):
         raise HTTPException(status_code=409, detail="Lock lost or invalid token")
     return {"status": "success"}
 
+class ApplyPolishRequest(BaseModel):
+    final_content: Optional[str] = None
+
+@router.post("/{doc_id}/apply-polish")
+async def apply_document_polish(
+    doc_id: str, 
+    payload: ApplyPolishRequest,
+    user_id: int = 1, # TODO: Get from Token
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        await DocumentService.apply_polish(db, doc_id, user_id, payload.final_content)
+        return {"status": "success"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/{doc_id}/discard-polish")
+async def discard_document_polish(
+    doc_id: str, 
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        await DocumentService.discard_polish(db, doc_id)
+        return {"status": "success"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/{doc_id}/polish")
 async def trigger_polish(doc_id: str, user_id: int, db: AsyncSession = Depends(get_async_db)):
     # 1. 持久化任务记录

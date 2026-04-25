@@ -2,7 +2,7 @@ import hashlib
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
-from app.models.document import Document
+from app.models.document import Document, DocumentSnapshot
 from app.core.enums import DocumentStatus
 
 class DocumentService:
@@ -29,9 +29,51 @@ class DocumentService:
         if draft_content is not None:
             doc.draft_suggestion = draft_content
         elif content is not None:
-            # 简单比较（实际可更复杂）
+            # 计算哈希判重
             if content != doc.content:
                 doc.content = content
+        
+        await db.commit()
+        return doc
+
+    @staticmethod
+    async def apply_polish(db: AsyncSession, doc_id: str, user_id: int, final_content: Optional[str] = None):
+        doc = await DocumentService.get_document(db, doc_id)
+        if not doc:
+            raise ValueError("Document not found")
+        
+        # 1. 生成快照备份原值
+        snapshot = DocumentSnapshot(
+            doc_id=doc_id,
+            content=doc.content,
+            trigger_event="accept_polish",
+            creator_id=user_id
+        )
+        db.add(snapshot)
+        
+        # 2. 覆盖正文
+        content_to_apply = final_content if final_content is not None else doc.ai_polished_content
+        if not content_to_apply:
+            raise ValueError("No polished content to apply")
+        
+        doc.content = content_to_apply
+        
+        # 3. 清空 DIFF 状态缓存
+        doc.ai_polished_content = None
+        doc.draft_suggestion = None
+        
+        await db.commit()
+        return doc
+
+    @staticmethod
+    async def discard_polish(db: AsyncSession, doc_id: str):
+        doc = await DocumentService.get_document(db, doc_id)
+        if not doc:
+            raise ValueError("Document not found")
+        
+        # 清空 DIFF 状态缓存
+        doc.ai_polished_content = None
+        doc.draft_suggestion = None
         
         await db.commit()
         return doc
