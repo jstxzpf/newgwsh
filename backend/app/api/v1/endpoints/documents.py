@@ -19,6 +19,47 @@ class AutoSaveRequest(BaseModel):
     content: Optional[str] = None
     draft_content: Optional[str] = None
 
+class InitRequest(BaseModel):
+    title: str
+
+@router.post("/init")
+async def init_document(
+    payload: InitRequest,
+    user_id: int = 1, # TODO: Get from Token
+    dept_id: int = 1, # TODO: Get from Token
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        doc_id = await DocumentService.init_document(db, payload.title, user_id, dept_id)
+        return {"doc_id": doc_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{doc_id}/submit")
+async def submit_document(
+    doc_id: str,
+    user_id: int = 1, # TODO: Get from Token
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        await DocumentService.submit_document(db, doc_id, user_id)
+        return {"status": "success"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/{doc_id}/revise")
+async def revise_document(
+    doc_id: str,
+    user_id: int = 1, # TODO: Get from Token
+    username: str = "测试科员",
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        result = await DocumentService.revise_document(db, doc_id, user_id, username)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
 @router.post("/{doc_id}/auto-save")
 async def auto_save_document(
     doc_id: str, 

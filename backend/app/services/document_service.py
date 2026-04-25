@@ -1,15 +1,44 @@
 import hashlib
-from typing import Optional
+import uuid
+from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
-from app.models.document import Document, DocumentSnapshot, WorkflowAudit
+from app.models.document import Document, DocumentSnapshot, DocumentApprovalLog, WorkflowAudit
 from app.core.enums import DocumentStatus, WorkflowNode
+from app.services.sip_service import SIPService
+from app.core.redis import redis_client
+from datetime import datetime
+import json
 
 class DocumentService:
     @staticmethod
     async def get_document(db: AsyncSession, doc_id: str) -> Optional[Document]:
         result = await db.execute(select(Document).where(Document.doc_id == doc_id, Document.is_deleted == False))
         return result.scalars().first()
+
+    @staticmethod
+    async def init_document(db: AsyncSession, title: str, user_id: int, dept_id: int):
+        doc_id = str(uuid.uuid4())
+        
+        doc = Document(
+            doc_id=doc_id,
+            title=title,
+            creator_id=user_id,
+            dept_id=dept_id,
+            status=DocumentStatus.DRAFTING
+        )
+        db.add(doc)
+        
+        audit = WorkflowAudit(
+            doc_id=doc_id,
+            workflow_node_id=WorkflowNode.DRAFTING,
+            operator_id=user_id,
+            action_details={"note": "初始化起草公文"}
+        )
+        db.add(audit)
+        
+        await db.commit()
+        return doc_id
 
     @staticmethod
     async def auto_save(
@@ -22,16 +51,39 @@ class DocumentService:
         if not doc:
             return None
         
-        # 校验 DIFF 模式保护：若处于润色态，拒绝直接覆写 content
         if doc.ai_polished_content and content is not None:
             raise ValueError("Cannot overwrite main content while in DIFF mode. Use draft_content instead.")
 
         if draft_content is not None:
             doc.draft_suggestion = draft_content
         elif content is not None:
-            # 计算哈希判重
             if content != doc.content:
                 doc.content = content
+        
+        await db.commit()
+        return doc
+
+    @staticmethod
+    async def submit_document(db: AsyncSession, doc_id: str, user_id: int):
+        doc = await DocumentService.get_document(db, doc_id)
+        if not doc:
+            raise ValueError("Document not found")
+            
+        if doc.status != DocumentStatus.DRAFTING and doc.status != DocumentStatus.REJECTED:
+            raise ValueError("Only DRAFTING or REJECTED documents can be submitted")
+            
+        if doc.creator_id != user_id:
+            raise ValueError("Only creator can submit the document")
+            
+        doc.status = DocumentStatus.SUBMITTED
+        
+        audit = WorkflowAudit(
+            doc_id=doc_id,
+            workflow_node_id=WorkflowNode.SUBMITTED,
+            operator_id=user_id,
+            action_details={"note": "起草人提交审批"}
+        )
+        db.add(audit)
         
         await db.commit()
         return doc
@@ -42,7 +94,6 @@ class DocumentService:
         if not doc:
             raise ValueError("Document not found")
         
-        # 1. 生成快照备份原值
         snapshot = DocumentSnapshot(
             doc_id=doc_id,
             content=doc.content,
@@ -51,12 +102,10 @@ class DocumentService:
         )
         db.add(snapshot)
         
-        # 2. 确定覆盖正文内容
         content_to_apply = final_content if final_content is not None else doc.ai_polished_content
         if not content_to_apply:
             raise ValueError("No polished content to apply")
             
-        # 3. 审计写入
         action_details = {}
         if final_content is not None and final_content != doc.ai_polished_content:
             action_details["note"] = "用户接受并修改后应用"
@@ -71,7 +120,6 @@ class DocumentService:
         )
         db.add(audit)
         
-        # 4. 执行覆写与状态清理
         doc.content = content_to_apply
         doc.ai_polished_content = None
         doc.draft_suggestion = None
@@ -85,9 +133,104 @@ class DocumentService:
         if not doc:
             raise ValueError("Document not found")
         
-        # 清空 DIFF 状态缓存
         doc.ai_polished_content = None
         doc.draft_suggestion = None
         
         await db.commit()
         return doc
+
+    @staticmethod
+    async def review_document(
+        db: AsyncSession, 
+        doc_id: str, 
+        reviewer_id: int, 
+        is_approved: bool, 
+        rejection_reason: str = None
+    ):
+        doc = await DocumentService.get_document(db, doc_id)
+        if not doc or doc.status != DocumentStatus.SUBMITTED:
+            raise ValueError("Document not found or not in SUBMITTED state")
+            
+        now = datetime.now()
+        doc.reviewer_id = reviewer_id
+        
+        audit_node = WorkflowNode.APPROVED if is_approved else WorkflowNode.REJECTED
+        new_status = DocumentStatus.APPROVED if is_approved else DocumentStatus.REJECTED
+        
+        sip_hash = None
+        if is_approved:
+            sip_hash = SIPService.generate_sip_fingerprint(doc.content, reviewer_id, now)
+        else:
+            if not rejection_reason:
+                raise ValueError("Rejection reason is required")
+                
+        doc.status = new_status
+        
+        approval_log = DocumentApprovalLog(
+            doc_id=doc_id,
+            submitter_id=doc.creator_id,
+            reviewer_id=reviewer_id,
+            decision_status=new_status.value,
+            rejection_reason=rejection_reason,
+            sip_hash=sip_hash,
+            reviewed_at=now
+        )
+        db.add(approval_log)
+        
+        audit = WorkflowAudit(
+            doc_id=doc_id,
+            workflow_node_id=audit_node,
+            operator_id=reviewer_id,
+            action_details={"rejection_reason": rejection_reason} if not is_approved else {"sip_generated": bool(sip_hash)}
+        )
+        db.add(audit)
+        
+        await db.commit()
+        return doc
+
+    @staticmethod
+    async def revise_document(db: AsyncSession, doc_id: str, user_id: int, username: str):
+        doc = await DocumentService.get_document(db, doc_id)
+        if not doc or doc.status != DocumentStatus.REJECTED:
+            raise ValueError("Only REJECTED documents can be revised")
+            
+        doc.status = DocumentStatus.DRAFTING
+        doc.ai_polished_content = None
+        doc.draft_suggestion = None
+        
+        audit = WorkflowAudit(
+            doc_id=doc_id,
+            workflow_node_id=WorkflowNode.REVISION,
+            operator_id=user_id,
+            action_details={"note": "起草人开始驳回修改"}
+        )
+        db.add(audit)
+        
+        lock_key = f"lock:{doc_id}"
+        token = str(uuid.uuid4())
+        lock_data = {
+            "user_id": user_id,
+            "username": username,
+            "acquired_at": datetime.now().isoformat(),
+            "token": token
+        }
+        from app.core.config import settings
+        success = await redis_client.set(
+            lock_key, 
+            json.dumps(lock_data), 
+            nx=True, 
+            ex=settings.LOCK_TTL_SECONDS
+        )
+        
+        if not success:
+            raise ValueError("Failed to acquire lock. It might be held by another session.")
+            
+        await db.commit()
+        
+        return {
+            "doc_id": doc_id,
+            "new_status": "DRAFTING",
+            "lock_acquired": True,
+            "lock_token": token,
+            "lock_expires_at": (datetime.now().timestamp() + settings.LOCK_TTL_SECONDS)
+        }
