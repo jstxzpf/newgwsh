@@ -22,8 +22,12 @@ async def get_lock_config():
 async def force_release_lock(
     lock_key: str,
     admin_id: int = 99, # 临时 mock 管理员
+    role_level: int = 1, # TODO: 从 Token 中获取
     db: AsyncSession = Depends(get_async_db)
 ):
+    if role_level < 99:
+        raise HTTPException(status_code=403, detail="Permission denied. Admin only.")
+
     if not lock_key.startswith("lock:"):
         lock_key = f"lock:{lock_key}"
         

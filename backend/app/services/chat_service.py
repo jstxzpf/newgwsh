@@ -34,7 +34,7 @@ class ChatService:
             SELECT kb_id FROM kb_tree
             WHERE 
                 (kb_tier = 'BASE') OR
-                (kb_tier = 'DEPT' AND :dept_id IS NOT NULL) OR
+                (kb_tier = 'DEPT' AND dept_id = :dept_id) OR
                 (kb_tier = 'PERSONAL' AND owner_id = :user_id)
         ),
         vector_search AS (

@@ -25,6 +25,7 @@ class KnowledgeBaseHierarchy(Base):
     kb_type = Column(String(64), nullable=False) # FILE or DIRECTORY
     kb_tier = Column(Enum(KBTier), nullable=False, default=KBTier.PERSONAL)
     security_level = Column(Enum(DataSecurityLevel), nullable=False, default=DataSecurityLevel.GENERAL)
+    dept_id = Column(Integer, ForeignKey("departments.dept_id"), index=True, nullable=True) # 追加：科室隔离
     parse_status = Column(String(64), nullable=False, default="READY")
     physical_file_id = Column(Integer, ForeignKey("knowledge_physical_files.file_id"), index=True, nullable=True)
     owner_id = Column(Integer, ForeignKey("system_users.user_id"), index=True, nullable=False)

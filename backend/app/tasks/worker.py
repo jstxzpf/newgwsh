@@ -80,6 +80,7 @@ def parse_kb_file_task(self, kb_id: int, file_path: str):
                     content=chunk_text,
                     kb_tier=node.kb_tier,
                     security_level=node.security_level,
+                    dept_id=node.dept_id, # 追加：同步科室属性
                     metadata_json={"source": "markitdown", "raw_length": len(chunk_text)}
                 )
                 db.add(new_chunk)

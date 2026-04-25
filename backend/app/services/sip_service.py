@@ -34,7 +34,8 @@ class SIPService:
         if not normalized_content:
             return None # 拒绝为无意义空文生成防伪签章
             
-        iso_time = reviewed_at.isoformat()
+        # 修正：移除微秒并使用标准 ISO 格式，防止数据库精度不匹配导致校验失败
+        iso_time = reviewed_at.replace(microsecond=0).isoformat()
         
         # 拼接原串公式
         raw_string = f"{normalized_content}|{reviewer_id}|{iso_time}"

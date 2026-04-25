@@ -21,8 +21,8 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
       try {
-        // 调用刷新接口 (后端需对应实现 /auth/refresh)
-        const res = await axios.post('/api/v1/auth/refresh', null, {
+        // 修正点：使用 apiClient 内部路径进行刷新
+        const res = await apiClient.post('/auth/refresh', null, {
           withCredentials: true 
         });
         const newToken = res.data.access_token;

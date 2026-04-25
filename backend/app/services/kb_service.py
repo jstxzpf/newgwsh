@@ -48,6 +48,7 @@ class KBService:
         filename: str, 
         phys_id: int, 
         user_id: int,
+        dept_id: Optional[int] = None,
         kb_tier: KBTier = KBTier.PERSONAL,
         security_level: DataSecurityLevel = DataSecurityLevel.GENERAL
     ) -> KnowledgeBaseHierarchy:
@@ -56,6 +57,7 @@ class KBService:
             kb_type="FILE",
             kb_tier=kb_tier,
             security_level=security_level,
+            dept_id=dept_id,
             parse_status="UPLOADED",
             physical_file_id=phys_id,
             owner_id=user_id

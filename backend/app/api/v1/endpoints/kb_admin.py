@@ -31,7 +31,7 @@ async def upload_knowledge_file(
     try:
         phys_file = await KBService.get_or_create_physical_file(db, file)
         node = await KBService.create_hierarchy_node(
-            db, file.filename, phys_file.file_id, user_id, kb_tier, security_level
+            db, file.filename, phys_file.file_id, user_id, dept_id, kb_tier, security_level
         )
         task_id = str(uuid.uuid4())
         new_task = AsyncTask(
