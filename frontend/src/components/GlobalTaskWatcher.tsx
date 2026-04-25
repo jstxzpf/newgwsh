@@ -40,26 +40,30 @@ export const GlobalTaskWatcher: React.FC = () => {
           connections.current[id] = es;
 
           es.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            updateTask(id, { progress: data.progress, status: data.status, result: data.result });
-            
-            if (data.status === 'COMPLETED' || data.status === 'FAILED') {
-              es.close();
-              delete connections.current[id];
+            try {
+              const data = JSON.parse(event.data);
+              updateTask(id, { progress: data.progress, status: data.status, result: data.result });
               
-              if (data.status === 'COMPLETED') {
-                notification.success({ 
-                  message: '任务完成', 
-                  description: `任务 ${id.slice(0, 8)} 已成功执行。` 
-                });
-              } else {
-                notification.error({ 
-                  message: '任务失败', 
-                  description: `后台处理引擎返回异常，请检查审计日志。` 
-                });
+              if (data.status === 'COMPLETED' || data.status === 'FAILED') {
+                es.close();
+                delete connections.current[id];
+                
+                if (data.status === 'COMPLETED') {
+                  notification.success({ 
+                    message: '任务完成', 
+                    description: `任务 ${id.slice(0, 8)} 已成功执行。` 
+                  });
+                } else {
+                  notification.error({ 
+                    message: '任务失败', 
+                    description: `后台处理引擎返回异常，请检查审计日志。` 
+                  });
+                }
+                // Keep task in state for 5s to allow UI feedback
+                setTimeout(() => removeTask(id), 5000);
               }
-              // Keep task in state for 5s to allow UI feedback
-              setTimeout(() => removeTask(id), 5000);
+            } catch (err) {
+              console.error("Malformed SSE payload received", err);
             }
           };
 

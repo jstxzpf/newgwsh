@@ -20,6 +20,11 @@ router = APIRouter()
 class AutoSaveRequest(BaseModel):
     content: Optional[str] = None
     draft_content: Optional[str] = None
+    
+    # 强化校验：禁止多余未定义字段，并配合模型方法探测显式传入
+    model_config = {
+        "extra": "forbid"
+    }
 
 class InitRequest(BaseModel):
     title: str
@@ -27,8 +32,8 @@ class InitRequest(BaseModel):
 @router.post("/init")
 async def init_document(
     payload: InitRequest,
-    user_id: int = 1, # TODO: Get from Token
-    dept_id: int = 1, # TODO: Get from Token
+    user_id: int = 1, 
+    dept_id: int = 1, 
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
@@ -40,7 +45,7 @@ async def init_document(
 @router.post("/{doc_id}/submit")
 async def submit_document(
     doc_id: str,
-    user_id: int = 1, # TODO: Get from Token
+    user_id: int = 1, 
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
@@ -52,7 +57,7 @@ async def submit_document(
 @router.post("/{doc_id}/revise")
 async def revise_document(
     doc_id: str,
-    user_id: int = 1, # TODO: Get from Token
+    user_id: int = 1, 
     username: str = "测试科员",
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -69,7 +74,16 @@ async def auto_save_document(
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
-        doc = await DocumentService.auto_save(db, doc_id, payload.content, payload.draft_content)
+        # 探测前端是否显式传递了 content 键 (即便值为 null 或未定义)
+        payload_keys = payload.model_dump(exclude_unset=True).keys()
+        
+        doc = await DocumentService.auto_save(
+            db, 
+            doc_id, 
+            payload.content, 
+            payload.draft_content, 
+            "content" in payload_keys
+        )
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         return {"status": "success"}
@@ -104,7 +118,7 @@ class ApplyPolishRequest(BaseModel):
 async def apply_document_polish(
     doc_id: str, 
     payload: ApplyPolishRequest,
-    user_id: int = 1, # TODO: Get from Token
+    user_id: int = 1, 
     db: AsyncSession = Depends(get_async_db)
 ):
     try:

@@ -45,14 +45,16 @@ class DocumentService:
         db: AsyncSession, 
         doc_id: str, 
         content: Optional[str] = None, 
-        draft_content: Optional[str] = None
+        draft_content: Optional[str] = None,
+        has_content_key: bool = False
     ):
         doc = await DocumentService.get_document(db, doc_id)
         if not doc:
             return None
         
-        if doc.ai_polished_content and content is not None:
-            raise ValueError("Cannot overwrite main content while in DIFF mode. Use draft_content instead.")
+        # 严格防御：若处于 DIFF 模式（ai_polished_content 非空），则必须拒绝包含 content 键的请求
+        if doc.ai_polished_content is not None and has_content_key:
+            raise ValueError("Forbidden: Cannot overwrite main content while in DIFF mode. Use draft_content only.")
 
         if draft_content is not None:
             doc.draft_suggestion = draft_content
@@ -75,7 +77,16 @@ class DocumentService:
         if doc.creator_id != user_id:
             raise ValueError("Only creator can submit the document")
             
+        # 1. 状态迁转
         doc.status = DocumentStatus.SUBMITTED
+        
+        # 2. 主动销毁 Redis 中的编辑锁 (二次除错补强)
+        lock_key = f"lock:{doc_id}"
+        current_lock = await redis_client.get(lock_key)
+        if current_lock:
+            lock_data = json.loads(current_lock)
+            if lock_data.get("user_id") == user_id:
+                await redis_client.delete(lock_key)
         
         audit = WorkflowAudit(
             doc_id=doc_id,

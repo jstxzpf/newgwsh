@@ -21,20 +21,22 @@ export const useAutoSave = (docId: string | null, lockState: LockState) => {
       // 1. 防空保护：如果根本没有内容，不执行无效保存
       if (!state.content && !state.aiPolishedContent) return;
       
-      // 2. 本地脏检查：如果与上次保存的指纹相同则跳过 (修复点)
+      // 2. 本地脏检查：如果与上次保存的指纹相同则跳过
       const currentFingerprint = `${state.content.length}-${state.viewMode}-${state.aiPolishedContent?.length || 0}`;
       if (currentFingerprint === state.lastSavedHash) return;
 
       const payload: any = {};
       if (state.viewMode === 'DIFF') {
-        payload.draft_content = state.content;
+        // 修正点：DIFF 模式下，应该保存的是用户正在修改的建议稿 aiPolishedContent
+        payload.draft_content = state.aiPolishedContent || '';
+        // 此时不传递 content 键，以触发后端的防绕过防御逻辑
       } else {
         payload.content = state.content;
       }
 
       try {
         await apiClient.post(`/documents/${docId}/auto-save`, payload);
-        // 3. 更新最近保存签章 (修复点)
+        // 3. 更新最近保存签章
         useEditorStore.getState().setLastSavedHash(currentFingerprint);
         console.log(`[AutoSave] Synced to cloud at ${new Date().toLocaleTimeString()}`);
       } catch (error) {
