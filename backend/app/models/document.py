@@ -64,7 +64,7 @@ class AsyncTask(Base):
     input_params = Column(JSONB, nullable=False, default={})
     retry_count = Column(Integer, nullable=False, default=0)
     doc_id = Column(String(64), ForeignKey("documents.doc_id"), nullable=True)
-    kb_id = Column(Integer, nullable=True) # Explicit foreign key omitted to avoid circular import dependency issue for now, will link logical.
+    kb_id = Column(Integer, ForeignKey("knowledge_base_hierarchy.kb_id"), nullable=True)
     creator_id = Column(Integer, ForeignKey("system_users.user_id"), nullable=False)
     progress_pct = Column(Integer, nullable=False, default=0)
     result_summary = Column(Text, nullable=True)
