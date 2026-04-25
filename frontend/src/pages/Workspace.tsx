@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Button, Spin, Modal, message } from 'antd';
+import { Button, Spin, Modal, message, Popconfirm } from 'antd';
 import { A4Engine } from '../components/Workspace/A4Engine';
 import { DiffView } from '../components/Workspace/DiffView';
 import { VirtualDocTree } from '../components/Workspace/VirtualDocTree';
@@ -11,6 +11,7 @@ import { LockConflictBanner } from '../components/Workspace/LockConflictBanner';
 import { useTaskWatcher } from '../hooks/useTaskWatcher';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
+import { countPureText } from '../utils/wordCount';
 
 export const Workspace: React.FC = () => {
   const { currentDocId, content, aiPolishedContent, setContent, setDocId, viewMode, setViewMode, setPolishedContent, context_kb_ids } = useEditorStore();
@@ -21,6 +22,7 @@ export const Workspace: React.FC = () => {
   const { watchTask, taskStatus, progress } = useTaskWatcher();
   const isReadOnly = lockState !== 'LOCKED';
   const isProcessing = taskStatus === 'QUEUED' || taskStatus === 'PROCESSING';
+  const wordCount = countPureText(content);
 
   useEffect(() => {
     if (!currentDocId) {
@@ -31,7 +33,6 @@ export const Workspace: React.FC = () => {
   const handleTriggerPolish = async () => {
     if (isReadOnly || !currentDocId || !userInfo) return;
     try {
-      // 携带挂载的上下文 ID
       const res = await apiClient.post(`/documents/${currentDocId}/polish`, {
         context_kb_ids: context_kb_ids
       }, {
@@ -64,20 +65,23 @@ export const Workspace: React.FC = () => {
 
   const handleDiscardPolish = async () => {
     if (!currentDocId) return;
-    Modal.confirm({
-      title: '放弃建议',
-      content: '确定要放弃当前的润色建议并回到原稿吗？',
-      onOk: async () => {
-        try {
-          await apiClient.post(`/documents/${currentDocId}/discard-polish`);
-          setViewMode('SINGLE');
-          setPolishedContent(null);
-          message.info('已丢弃润色建议');
-        } catch (err) {
-          message.error('操作失败');
-        }
+    try {
+      await apiClient.post(`/documents/${currentDocId}/discard-polish`);
+      setViewMode('SINGLE');
+      setPolishedContent(null);
+      message.info('已丢弃润色建议');
+    } catch (err) {
+      message.error('操作失败');
+    }
+  };
+
+  const handleSubmitApproval = async () => {
+      try {
+          await apiClient.post(`/documents/${currentDocId}/submit`);
+          message.success('公文已提交审批');
+      } catch (err) {
+          message.error('提交失败');
       }
-    });
   };
 
   return (
@@ -86,21 +90,38 @@ export const Workspace: React.FC = () => {
         <span style={{ fontWeight: 'bold' }}>泰兴市国家统计局公文处理系统</span>
         <div style={{ flex: 1 }}></div>
         
+        <Button onClick={() => message.info('快照回滚功能规划中')}>历史快照 ⏱</Button>
+
         {viewMode === 'SINGLE' && (
-          <Button 
-            type="primary" 
-            style={{ backgroundColor: '#722ed1', border: 'none' }} 
-            onClick={handleTriggerPolish}
-            loading={isProcessing}
-            disabled={isReadOnly || content.length === 0}
-          >
-            {isProcessing ? `AI 研读中... ${progress}%` : '✨ AI 智能润色'}
-          </Button>
+          <>
+            <Button 
+                type="primary" 
+                style={{ backgroundColor: '#722ed1', border: 'none' }} 
+                onClick={handleTriggerPolish}
+                loading={isProcessing}
+                disabled={isReadOnly || content.length === 0}
+            >
+                {isProcessing ? `AI 研读中... ${progress}%` : '✨ AI 智能润色'}
+            </Button>
+            
+            <Popconfirm 
+                title="确认提交审批？" 
+                description="提交后公文将锁定，只有负责人驳回后才能再次编辑。"
+                onConfirm={handleSubmitApproval}
+                disabled={isReadOnly || content.length === 0}
+            >
+                <Button type="primary" style={{ backgroundColor: '#faad14', border: 'none' }} disabled={isReadOnly || content.length === 0}>
+                    提交审批
+                </Button>
+            </Popconfirm>
+          </>
         )}
         
         {viewMode === 'DIFF' && (
           <>
-            <Button onClick={handleDiscardPolish} danger>丢弃建议</Button>
+            <Popconfirm title="放弃建议？" description="此操作将丢失当前的 AI 润色成果。" onConfirm={handleDiscardPolish}>
+                <Button danger>丢弃建议</Button>
+            </Popconfirm>
             <Button type="primary" onClick={handleApplyPolish} style={{ backgroundColor: '#52c41a', border: 'none' }}>接受并合并</Button>
           </>
         )}
@@ -143,6 +164,11 @@ export const Workspace: React.FC = () => {
             <DiffView />
           )}
         </div>
+      </div>
+
+      <div style={{ height: '24px', background: '#f0f2f5', borderTop: '1px solid #d9d9d9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', fontSize: '12px', color: '#888' }}>
+        <span>AI 引擎状态: 🟢 在线</span>
+        <span>{wordCount} 纯字数 | 泰兴市国家统计局公文处理系统 V3.0</span>
       </div>
       
       <ChatPanel />
