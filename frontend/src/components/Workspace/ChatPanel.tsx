@@ -75,7 +75,9 @@ export const ChatPanel: React.FC = () => {
                   padding: '8px 12px', 
                   borderRadius: '8px', 
                   width: '100%',
-                  border: item.role === 'user' ? '1px solid #d9d9d9' : '1px solid #91caff'
+                  border: item.role === 'user' ? '1px solid #d9d9d9' : '1px solid #91caff',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'break-word'
                 }}>
                   <div style={{ fontSize: '11px', color: '#888', marginBottom: 4 }}>{item.role === 'user' ? '您' : '政务助手'}</div>
                   <Text style={{ whiteSpace: 'pre-wrap', fontSize: '14px' }}>{item.content}</Text>
