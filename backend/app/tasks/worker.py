@@ -7,10 +7,6 @@ from app.models.document import AsyncTask
 from app.core.enums import TaskStatus
 
 def update_task_progress(task_id: str, progress: int, status: TaskStatus, result: str = None):
-    # 更新 Redis 供 SSE 快速轮询
-    # redis_client is expected to be a sync-compatible or the existing async client used in a sync-compatible way if needed, 
-    # but here Celery worker is sync. We should use a sync redis client or a wrapper.
-    # For simplicity in this step, let's assume we use a sync redis connection for worker.
     import redis
     from app.core.config import settings
     r = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -44,3 +40,8 @@ def dummy_polish_task(self, doc_id: str):
     
     time.sleep(2)
     update_task_progress(task_id, 100, TaskStatus.COMPLETED, result="AI 润色建议内容预览...")
+
+@celery_app.task(bind=True)
+def parse_kb_file_task(self, kb_id: int, file_path: str):
+    # Placeholder for Task 2
+    pass
