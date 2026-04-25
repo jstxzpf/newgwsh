@@ -26,17 +26,26 @@ async def sse_events(task_id: str, ticket: str, request: Request):
     await redis_client.delete(f"sse_ticket:{ticket}")
 
     async def event_generator():
-        while True:
-            if await request.is_disconnected():
-                break
-            
-            data = await redis_client.get(f"task_status:{task_id}")
-            if data:
-                yield f"data: {data}\n\n"
-                status_obj = json.loads(data)
-                if status_obj["status"] in ["COMPLETED", "FAILED"]:
+        try:
+            while True:
+                # 检查客户端连接状态
+                if await request.is_disconnected():
                     break
-            
-            await asyncio.sleep(0.5)
+                
+                data = await redis_client.get(f"task_status:{task_id}")
+                if data:
+                    yield f"data: {data}\n\n"
+                    status_obj = json.loads(data)
+                    # 如果任务结束，跳出循环并断开连接
+                    if status_obj["status"] in ["COMPLETED", "FAILED"]:
+                        break
+                
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            # 正常关闭
+            pass
+        except Exception:
+            # 捕获异常防止崩溃
+            pass
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
