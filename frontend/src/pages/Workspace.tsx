@@ -1,63 +1,142 @@
 import React, { useEffect } from 'react';
+import { Button, Spin, Modal, message } from 'antd';
 import { A4Engine } from '../components/Workspace/A4Engine';
+import { DiffView } from '../components/Workspace/DiffView';
 import { useEditorStore } from '../store/useEditorStore';
 import { useLockGuard } from '../hooks/useLockGuard';
 import { useAutoSave } from '../hooks/useAutoSave';
 import { LockConflictBanner } from '../components/Workspace/LockConflictBanner';
+import { useTaskWatcher } from '../hooks/useTaskWatcher';
+import apiClient from '../api/client';
+import { useAuthStore } from '../store/useAuthStore';
 
 export const Workspace: React.FC = () => {
-  const { currentDocId, content, setContent, setDocId } = useEditorStore();
+  const { currentDocId, content, aiPolishedContent, setContent, setDocId, viewMode, setViewMode, setPolishedContent } = useEditorStore();
+  const userInfo = useAuthStore(state => state.userInfo);
+  const { lockState } = useLockGuard(currentDocId);
+  useAutoSave(currentDocId, lockState);
+  
+  const { watchTask, taskStatus, progress } = useTaskWatcher();
+  const isReadOnly = lockState !== 'LOCKED';
+  const isProcessing = taskStatus === 'QUEUED' || taskStatus === 'PROCESSING';
 
-  // 模拟进入页面时初始化一个 docId (实际应从路由参数获取)
   useEffect(() => {
     if (!currentDocId) {
       setDocId('test-doc-uuid-1234');
     }
   }, [currentDocId, setDocId]);
 
-  // 挂载锁守卫
-  const { lockState } = useLockGuard(currentDocId);
-  // 挂载自动保存引擎
-  useAutoSave(currentDocId, lockState);
+  const handleTriggerPolish = async () => {
+    if (isReadOnly || !currentDocId || !userInfo) return;
+    try {
+      const res = await apiClient.post(`/documents/${currentDocId}/polish`, null, {
+        params: { user_id: userInfo.userId }
+      });
+      watchTask(res.data.task_id, (result) => {
+        setPolishedContent(result);
+        setViewMode('DIFF');
+        message.success('AI 润色完成，已进入比对模式');
+      });
+    } catch (err) {
+      message.error('触发润色失败');
+    }
+  };
 
-  const isReadOnly = lockState !== 'LOCKED';
+  const handleApplyPolish = async () => {
+    if (!currentDocId) return;
+    try {
+      await apiClient.post(`/documents/${currentDocId}/apply-polish`, {
+        final_content: aiPolishedContent
+      });
+      setContent(aiPolishedContent || '');
+      setViewMode('SINGLE');
+      setPolishedContent(null);
+      message.success('已接受润色并合并原稿');
+    } catch (err) {
+      message.error('应用润色失败');
+    }
+  };
+
+  const handleDiscardPolish = async () => {
+    if (!currentDocId) return;
+    Modal.confirm({
+      title: '放弃建议',
+      content: '确定要放弃当前的润色建议并回到原稿吗？',
+      onOk: async () => {
+        try {
+          await apiClient.post(`/documents/${currentDocId}/discard-polish`);
+          setViewMode('SINGLE');
+          setPolishedContent(null);
+          message.info('已丢弃润色建议');
+        } catch (err) {
+          message.error('操作失败');
+        }
+      }
+    });
+  };
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ height: '56px', background: '#003366', color: '#fff', display: 'flex', alignItems: 'center', padding: '0 24px' }}>
-        <span>泰兴市国家统计局公文处理系统 - 指挥带 (Action Bar)</span>
-        <span style={{ marginLeft: 'auto', fontSize: '12px', opacity: 0.8 }}>
+      <div style={{ height: '56px', background: '#003366', color: '#fff', display: 'flex', alignItems: 'center', padding: '0 24px', gap: '16px' }}>
+        <span style={{ fontWeight: 'bold' }}>泰兴市国家统计局公文处理系统</span>
+        <div style={{ flex: 1 }}></div>
+        
+        {viewMode === 'SINGLE' && (
+          <Button 
+            type="primary" 
+            style={{ backgroundColor: '#722ed1', border: 'none' }} 
+            onClick={handleTriggerPolish}
+            loading={isProcessing}
+            disabled={isReadOnly || content.length === 0}
+          >
+            {isProcessing ? `AI 研读中... ${progress}%` : '✨ AI 智能润色'}
+          </Button>
+        )}
+        
+        {viewMode === 'DIFF' && (
+          <>
+            <Button onClick={handleDiscardPolish} danger>丢弃建议</Button>
+            <Button type="primary" onClick={handleApplyPolish} style={{ backgroundColor: '#52c41a', border: 'none' }}>接受并合并</Button>
+          </>
+        )}
+        
+        <span style={{ fontSize: '12px', opacity: 0.8, marginLeft: '16px' }}>
           {lockState === 'ACQUIRING' ? '正在获取锁...' : lockState === 'LOCKED' ? '已锁定' : '只读'}
         </span>
       </div>
       
       <LockConflictBanner lockState={lockState} />
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        {isProcessing && (
+          <div style={{ 
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, 
+            backgroundColor: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(2px)', 
+            zIndex: 50, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' 
+          }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 20, color: '#003366', fontWeight: 'bold' }}>AI 正在研读台账并组织政务语言，请稍候... ({progress}%)</div>
+          </div>
+        )}
+
         <div style={{ width: '280px', borderRight: '1px solid #d9d9d9', background: '#fff' }}>
-          VirtualDocTree (挂载台账)
+          VirtualDocTree
         </div>
-        <div style={{ flex: 1, background: 'var(--bg-workspace)' }}>
-          <A4Engine>
-            <textarea 
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              disabled={isReadOnly}
-              style={{ 
-                width: '100%', 
-                height: '100%', 
-                minHeight: '1000px', 
-                border: 'none', 
-                resize: 'none', 
-                outline: 'none', 
-                backgroundColor: 'transparent',
-                cursor: isReadOnly ? 'not-allowed' : 'text',
-                color: isReadOnly ? '#555' : 'inherit'
-              }}
-              placeholder={isReadOnly ? "只读模式，无法编辑..." : "请在此输入公文正文..."}
-              className="gov-text"
-            />
-          </A4Engine>
+        <div style={{ flex: 1, background: 'var(--bg-workspace)', overflowY: 'auto' }}>
+          {viewMode === 'SINGLE' ? (
+            <A4Engine>
+              <textarea 
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                disabled={isReadOnly}
+                style={{ width: '100%', height: '100%', minHeight: '1000px', border: 'none', resize: 'none', outline: 'none', backgroundColor: 'transparent', cursor: isReadOnly ? 'not-allowed' : 'text', color: isReadOnly ? '#555' : 'inherit' }}
+                placeholder={isReadOnly ? "只读模式，无法编辑..." : "请在此输入公文正文..."}
+                className="gov-text"
+              />
+            </A4Engine>
+          ) : (
+            <DiffView />
+          )}
         </div>
       </div>
     </div>
