@@ -8,10 +8,12 @@ from typing import Optional
 import uuid
 import json
 from app.tasks.worker import dummy_polish_task
-from app.models.document import AsyncTask
+from app.models.document import AsyncTask, DocumentApprovalLog, Document
 from app.core.enums import TaskType, TaskStatus
 from app.core.redis import redis_client
 from app.api.dependencies import ai_rate_limiter
+from app.services.sip_service import SIPService
+from sqlalchemy import select
 
 router = APIRouter()
 
@@ -76,7 +78,6 @@ async def auto_save_document(
 
 @router.post("/{doc_id}/lock")
 async def acquire_document_lock(doc_id: str, user_id: int, username: str):
-    # TODO: user_id should be extracted from Auth Token
     token = await LockService.acquire_lock(doc_id, user_id, username)
     if not token:
         raise HTTPException(status_code=409, detail="Document is being edited by another user")
@@ -125,7 +126,6 @@ async def discard_document_polish(
 
 @router.post("/{doc_id}/polish", dependencies=[Depends(ai_rate_limiter)])
 async def trigger_polish(doc_id: str, user_id: int, db: AsyncSession = Depends(get_async_db)):
-    # 1. 持久化任务记录
     task_id = str(uuid.uuid4())
     new_task = AsyncTask(
         task_id=task_id,
@@ -137,10 +137,8 @@ async def trigger_polish(doc_id: str, user_id: int, db: AsyncSession = Depends(g
     db.add(new_task)
     await db.commit()
     
-    # 2. 派发 Celery 任务
     dummy_polish_task.apply_async(args=[doc_id], task_id=task_id)
     
-    # 3. 初始状态同步 Redis
     await redis_client.set(f"task_status:{task_id}", json.dumps({
         "progress": 0,
         "status": TaskStatus.QUEUED,
@@ -148,3 +146,29 @@ async def trigger_polish(doc_id: str, user_id: int, db: AsyncSession = Depends(g
     }), ex=3600)
     
     return {"task_id": task_id}
+
+@router.get("/{doc_id}/verify-sip")
+async def verify_document_sip(doc_id: str, db: AsyncSession = Depends(get_async_db)):
+    stmt = select(DocumentApprovalLog).where(
+        DocumentApprovalLog.doc_id == doc_id, 
+        DocumentApprovalLog.decision_status == "APPROVED"
+    ).order_by(DocumentApprovalLog.reviewed_at.desc()).limit(1)
+    
+    res = await db.execute(stmt)
+    log = res.scalars().first()
+    
+    if not log or not log.sip_hash:
+        return {"is_valid": False, "message": "未找到该公文的有效审批存证记录"}
+        
+    doc_res = await db.execute(select(Document).where(Document.doc_id == doc_id))
+    doc = doc_res.scalars().first()
+    
+    if not doc:
+        return {"is_valid": False, "message": "公文实体不存在"}
+        
+    current_hash = SIPService.generate_sip_fingerprint(doc.content, log.reviewer_id, log.reviewed_at)
+    
+    if current_hash == log.sip_hash:
+        return {"is_valid": True, "message": "存证校验通过，内容未被篡改"}
+    else:
+        return {"is_valid": False, "message": "存证校验失败！内容可能已被篡改"}

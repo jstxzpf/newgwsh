@@ -1,14 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
-import { ConfigProvider, Layout, Menu, Badge, Avatar } from 'antd';
+import { ConfigProvider, Layout, Menu } from 'antd';
 import { 
   DashboardOutlined, 
   FormOutlined, 
   DatabaseOutlined, 
   CheckCircleOutlined, 
-  SettingOutlined,
-  BellOutlined,
-  UserOutlined
+  SettingOutlined
 } from '@ant-design/icons';
 import { taixingTheme } from './theme/themeConfig';
 import { AntiLeakWatermark } from './components/Security/AntiLeakWatermark';
@@ -19,10 +17,11 @@ import { Approvals } from './pages/Approvals';
 import { Settings } from './pages/Settings';
 import { Documents } from './pages/Documents';
 import { useAuthStore } from './store/useAuthStore';
+import { GlobalTaskWatcher } from './components/GlobalTaskWatcher';
 import apiClient from './api/client';
 import './styles/global.css';
 
-const { Sider, Header } = Layout;
+const { Sider } = Layout;
 
 function App() {
   const userInfo = useAuthStore(state => state.userInfo);
@@ -44,11 +43,12 @@ function App() {
 
   return (
     <ConfigProvider theme={taixingTheme}>
+      <GlobalTaskWatcher />
       {userInfo && <AntiLeakWatermark username={userInfo.username} department={userInfo.deptName} />}
       <Router>
         <Layout style={{ minHeight: '100vh' }}>
           <Sider width={240} style={{ background: '#003366' }}>
-            <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+            <div style={{ height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
               泰兴统计局 V3.0
             </div>
             <Menu theme="dark" mode="vertical" defaultSelectedKeys={['dashboard']} style={{ background: '#003366', border: 'none', marginTop: '16px' }}>

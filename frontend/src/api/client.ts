@@ -16,7 +16,24 @@ apiClient.interceptors.request.use((config) => {
 
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config;
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      try {
+        // 调用刷新接口 (后端需对应实现 /auth/refresh)
+        const res = await axios.post('/api/v1/auth/refresh', null, {
+          withCredentials: true 
+        });
+        const newToken = res.data.access_token;
+        useAuthStore.getState().setToken(newToken);
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return apiClient(originalRequest);
+      } catch (refreshError) {
+        useAuthStore.getState().logout();
+        return Promise.reject(refreshError);
+      }
+    }
     return Promise.reject(error);
   }
 );
