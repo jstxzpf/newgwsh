@@ -1,4 +1,6 @@
 import ipaddress
+import uuid
+import structlog
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -29,3 +31,21 @@ class RoutingGuardMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=403, content={"detail": "非法的子网来源，算力穿透被阻断。"})
             
         return await call_next(request)
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # 提取或生成 trace_id
+        trace_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        
+        # 绑定到当前协程上下文
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(
+            trace_id=trace_id,
+            client_ip=request.client.host if request.client else "unknown",
+            method=request.method,
+            path=request.url.path
+        )
+        
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = trace_id
+        return response
