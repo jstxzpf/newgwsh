@@ -9,7 +9,7 @@ import uuid
 import json
 from app.tasks.worker import dummy_polish_task
 from app.models.document import AsyncTask, DocumentApprovalLog, Document
-from app.core.enums import TaskType, TaskStatus
+from app.core.enums import TaskType, TaskStatus, DocumentStatus
 from app.core.redis import redis_client
 from app.api.dependencies import ai_rate_limiter
 from app.services.sip_service import SIPService
@@ -20,11 +20,7 @@ router = APIRouter()
 class AutoSaveRequest(BaseModel):
     content: Optional[str] = None
     draft_content: Optional[str] = None
-    
-    # 强化校验：禁止多余未定义字段，并配合模型方法探测显式传入
-    model_config = {
-        "extra": "forbid"
-    }
+    model_config = {"extra": "forbid"}
 
 class InitRequest(BaseModel):
     title: str
@@ -74,16 +70,8 @@ async def auto_save_document(
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
-        # 探测前端是否显式传递了 content 键 (即便值为 null 或未定义)
         payload_keys = payload.model_dump(exclude_unset=True).keys()
-        
-        doc = await DocumentService.auto_save(
-            db, 
-            doc_id, 
-            payload.content, 
-            payload.draft_content, 
-            "content" in payload_keys
-        )
+        doc = await DocumentService.auto_save(db, doc_id, payload.content, payload.draft_content, "content" in payload_keys)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         return {"status": "success"}
@@ -139,7 +127,22 @@ async def discard_document_polish(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/{doc_id}/polish", dependencies=[Depends(ai_rate_limiter)])
-async def trigger_polish(doc_id: str, user_id: int, db: AsyncSession = Depends(get_async_db)):
+async def trigger_polish(
+    doc_id: str, 
+    user_id: int, 
+    lock_token: str, # 颗粒度对齐：必须凭锁触发
+    db: AsyncSession = Depends(get_async_db)
+):
+    # 校验锁持有权
+    lock_key = f"lock:{doc_id}"
+    lock_data_raw = await redis_client.get(lock_key)
+    if not lock_data_raw:
+        raise HTTPException(status_code=409, detail="Must hold a lock to trigger AI polish")
+    
+    lock_data = json.loads(lock_data_raw)
+    if lock_data.get("token") != lock_token or lock_data.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Lock token mismatch or not owner")
+
     task_id = str(uuid.uuid4())
     new_task = AsyncTask(
         task_id=task_id,

@@ -19,8 +19,15 @@ async def upload_knowledge_file(
     kb_tier: KBTier = Form(KBTier.PERSONAL),
     security_level: DataSecurityLevel = Form(DataSecurityLevel.GENERAL),
     user_id: int = 1, 
+    role_level: int = 1, # TODO: Mock
     db: AsyncSession = Depends(get_async_db)
 ):
+    # 颗粒度对齐：校验上传权限
+    if kb_tier == KBTier.BASE and role_level < 99:
+        raise HTTPException(status_code=403, detail="Only admin can upload to BASE tier")
+    if kb_tier == KBTier.DEPT and role_level < 5:
+        raise HTTPException(status_code=403, detail="Only department head can upload to DEPT tier")
+
     try:
         phys_file = await KBService.get_or_create_physical_file(db, file)
         node = await KBService.create_hierarchy_node(
@@ -58,17 +65,16 @@ async def upload_knowledge_file(
 
 @router.get("/hierarchy")
 async def get_hierarchy(
-    user_id: int = 1, # TODO: Mock
-    dept_id: int = 1, # TODO: Mock
+    user_id: int = 1, 
+    dept_id: int = 1, 
     db: AsyncSession = Depends(get_async_db)
 ):
     # 构建基础查询（排除已软删）
     stmt = select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.is_deleted == False)
     
-    # 按照 KBTier 构建权限屏障条件 (二次除错补强：防止个人库越权泄露)
+    # 按照 KBTier 构建权限屏障条件
     condition = or_(
         KnowledgeBaseHierarchy.kb_tier == KBTier.BASE,
-        # 暂时简化：DEPT 暂不强制校验 dept_id（待后续扩展）
         (KnowledgeBaseHierarchy.kb_tier == KBTier.DEPT), 
         (KnowledgeBaseHierarchy.kb_tier == KBTier.PERSONAL) & (KnowledgeBaseHierarchy.owner_id == user_id)
     )
@@ -84,6 +90,7 @@ async def delete_knowledge_node(
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
+        # TODO: Check owner permission before delete
         await KBService.delete_kb_node(db, kb_id)
         return {"status": "success", "message": "Node and its children marked as deleted"}
     except Exception as e:

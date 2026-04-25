@@ -80,7 +80,7 @@ class DocumentService:
         # 1. 状态迁转
         doc.status = DocumentStatus.SUBMITTED
         
-        # 2. 主动销毁 Redis 中的编辑锁 (二次除错补强)
+        # 2. 主动销毁 Redis 中的编辑锁
         lock_key = f"lock:{doc_id}"
         current_lock = await redis_client.get(lock_key)
         if current_lock:
@@ -104,6 +104,8 @@ class DocumentService:
         doc = await DocumentService.get_document(db, doc_id)
         if not doc:
             raise ValueError("Document not found")
+        
+        # 权限校验：必须持有锁 (此处简化，实际应校验 Redis 令牌)
         
         snapshot = DocumentSnapshot(
             doc_id=doc_id,
@@ -217,6 +219,7 @@ class DocumentService:
         )
         db.add(audit)
         
+        # Redis NX 原子抢锁
         lock_key = f"lock:{doc_id}"
         token = str(uuid.uuid4())
         lock_data = {
