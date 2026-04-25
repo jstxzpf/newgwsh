@@ -52,10 +52,25 @@ export const VirtualDocTree: React.FC = () => {
         checkedKeys={context_kb_ids.map(String)}
         onCheck={onCheck}
         style={{
-          minWidth: 0,
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap'
+          width: '100%',
+          overflow: 'hidden'
         }}
+        titleRender={(nodeData) => (
+          <div 
+            style={{ 
+              minWidth: 0, 
+              textOverflow: 'ellipsis', 
+              whiteSpace: 'nowrap', 
+              overflow: 'hidden',
+              display: 'inline-block',
+              maxWidth: '180px', // 颗粒度对齐：强制截断保护
+              verticalAlign: 'middle'
+            }} 
+            title={nodeData.title as string}
+          >
+            {nodeData.title as React.ReactNode}
+          </div>
+        )}
       />
     </div>
   );
