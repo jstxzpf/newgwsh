@@ -1,9 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Modal, message, Popconfirm, Skeleton, Badge, Avatar } from 'antd';
-import { 
-  BellOutlined, 
-  UserOutlined 
-} from '@ant-design/icons';
+import { Button, Modal, message, Popconfirm, Skeleton } from 'antd';
 import { A4Engine } from '../components/Workspace/A4Engine';
 import { DiffView } from '../components/Workspace/DiffView';
 import { VirtualDocTree } from '../components/Workspace/VirtualDocTree';
@@ -34,31 +30,19 @@ export const Workspace: React.FC = () => {
   const wordCount = countPureText(content);
   const isProcessing = taskStatus === 'QUEUED' || taskStatus === 'PROCESSING';
 
-  const [sysStatus, setSysStatus] = useState<boolean>(true);
+  // 颗粒度对齐：更新全局 Footer 中的字数
   useEffect(() => {
-    const probe = async () => {
-      try {
-        const res = await apiClient.get('/sys/status');
-        setSysStatus(res.data.ai_engine_online);
-      } catch (e) {
-        setSysStatus(false);
-      }
-    };
-    probe();
-    const t = setInterval(probe, 30000);
-    return () => clearInterval(t);
-  }, []);
+    const el = document.getElementById('global-word-count');
+    if (el) el.innerText = `${wordCount} 纯字数`;
+  }, [wordCount]);
 
   useEffect(() => {
-    if (!currentDocId) {
-      setDocId('test-doc-uuid-1234');
-    } else {
-        // Sync document status from server to determine immutability
+    if (currentDocId) {
         apiClient.get(`/documents/${currentDocId}`).then(res => {
             if (res.data) setDocStatus(res.data.status);
         }).catch(() => {});
     }
-  }, [currentDocId, setDocId]);
+  }, [currentDocId]);
 
   const handleTriggerPolish = async () => {
     if (isReadOnly || !currentDocId || !userInfo) return;
@@ -116,14 +100,14 @@ export const Workspace: React.FC = () => {
   };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ height: '64px', background: '#003366', color: '#fff', display: 'flex', alignItems: 'center', padding: '0 24px', gap: '16px' }}>
-        <span style={{ fontWeight: 'bold', fontSize: '18px' }}>泰兴市国家统计局公文处理系统</span>
-        <div style={{ flex: 1 }}></div>
-        
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* 次级指挥带 (蓝色) */}
+      <div style={{ height: '48px', background: '#003366', color: '#fff', display: 'flex', alignItems: 'center', padding: '0 24px', gap: '16px' }}>
         <SnapshotRecoveryDrawer docId={currentDocId} />
 
-        {viewMode === 'SINGLE' && (
+        <div style={{ flex: 1 }}></div>
+
+        {viewMode === 'SINGLE' ? (
           <>
             <Button 
                 type="primary" 
@@ -137,7 +121,6 @@ export const Workspace: React.FC = () => {
             
             <Popconfirm 
                 title="确认提交审批？" 
-                description="提交后公文将锁定，只有负责人驳回后才能再次编辑。"
                 onConfirm={handleSubmitApproval}
                 disabled={isReadOnly || content.length === 0}
             >
@@ -146,29 +129,17 @@ export const Workspace: React.FC = () => {
                 </Button>
             </Popconfirm>
           </>
-        )}
-        
-        {viewMode === 'DIFF' && (
+        ) : (
           <>
-            <Popconfirm title="放弃建议？" description="此操作将丢失当前的 AI 润色成果。" onConfirm={handleDiscardPolish}>
+            <Popconfirm title="放弃建议？" onConfirm={handleDiscardPolish}>
                 <Button danger>丢弃建议</Button>
             </Popconfirm>
             <Button type="primary" onClick={handleApplyPolish} style={{ backgroundColor: '#52c41a', border: 'none' }}>接受并合并</Button>
           </>
         )}
-        
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginLeft: '24px' }}>
-          <Badge count={2} size="small" offset={[2, 0]}>
-            <BellOutlined style={{ fontSize: '18px', color: '#fff', cursor: 'pointer' }} />
-          </Badge>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
-            <span style={{ fontSize: '14px' }}>{userInfo?.username}</span>
-          </div>
-        </div>
 
         <span style={{ fontSize: '12px', opacity: 0.8, marginLeft: '16px' }}>
-          {isConflict ? '锁冲突 (只读)' : isImmutable ? '已归档 (只读)' : '已锁定'}
+          {isConflict ? '锁冲突 (只读)' : isImmutable ? '已归档 (只读)' : '已锁定编辑'}
         </span>
       </div>
       
@@ -195,7 +166,7 @@ export const Workspace: React.FC = () => {
           {viewMode === 'SINGLE' ? (
             <A4Engine>
               <textarea 
-                value={content}
+                value={content || ''}
                 onChange={(e) => setContent(e.target.value)}
                 disabled={isReadOnly}
                 style={{ width: '100%', height: '100%', minHeight: '1000px', border: 'none', resize: 'none', outline: 'none', backgroundColor: 'transparent', cursor: isReadOnly ? 'not-allowed' : 'text', color: isReadOnly ? '#555' : 'inherit' }}
@@ -207,11 +178,6 @@ export const Workspace: React.FC = () => {
             <DiffView />
           )}
         </div>
-      </div>
-
-      <div style={{ height: '24px', background: '#f0f2f5', borderTop: '1px solid #d9d9d9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', fontSize: '12px', color: '#888' }}>
-        <span>AI 引擎状态: {sysStatus ? '🟢 在线' : '🔴 离线'}</span>
-        <span>{wordCount} 纯字数 | 泰兴市国家统计局公文处理系统 V3.0</span>
       </div>
       
       <ChatPanel />

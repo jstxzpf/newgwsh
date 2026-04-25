@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     HEARTBEAT_INTERVAL_SECONDS: int = 90
     RETRY_BACKOFF_BASE_SECONDS: int = 2
     RETRY_BACKOFF_MAX_SECONDS: int = 30
+    
+    # AI 引擎配置 (颗粒度对齐)
+    OLLAMA_MODEL: str = "gemma4:e4b"
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
