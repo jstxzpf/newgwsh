@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Spin, Modal, message, Popconfirm, Skeleton, Badge, Avatar } from 'antd';
+import { Button, Modal, message, Popconfirm, Skeleton, Badge, Avatar } from 'antd';
 import { 
   BellOutlined, 
   UserOutlined 
@@ -24,10 +24,15 @@ export const Workspace: React.FC = () => {
   const { lockState } = useLockGuard(currentDocId);
   useAutoSave(currentDocId, lockState);
   
+  const [docStatus, setDocStatus] = useState<string>('DRAFTING');
   const { watchTask, taskStatus, progress } = useTaskWatcher();
-  const isReadOnly = lockState !== 'LOCKED';
-  const isProcessing = taskStatus === 'QUEUED' || taskStatus === 'PROCESSING';
+  
+  const isConflict = lockState === 'READONLY_CONFLICT';
+  const isImmutable = docStatus !== 'DRAFTING';
+  const isReadOnly = isConflict || isImmutable;
+  
   const wordCount = countPureText(content);
+  const isProcessing = taskStatus === 'QUEUED' || taskStatus === 'PROCESSING';
 
   const [sysStatus, setSysStatus] = useState<boolean>(true);
   useEffect(() => {
@@ -47,6 +52,11 @@ export const Workspace: React.FC = () => {
   useEffect(() => {
     if (!currentDocId) {
       setDocId('test-doc-uuid-1234');
+    } else {
+        // Sync document status from server to determine immutability
+        apiClient.get(`/documents/${currentDocId}`).then(res => {
+            if (res.data) setDocStatus(res.data.status);
+        }).catch(() => {});
     }
   }, [currentDocId, setDocId]);
 
@@ -99,6 +109,7 @@ export const Workspace: React.FC = () => {
       try {
           await apiClient.post(`/documents/${currentDocId}/submit`);
           message.success('公文已提交审批');
+          setDocStatus('SUBMITTED');
       } catch (err) {
           message.error('提交失败');
       }
@@ -106,8 +117,8 @@ export const Workspace: React.FC = () => {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ height: '56px', background: '#003366', color: '#fff', display: 'flex', alignItems: 'center', padding: '0 24px', gap: '16px' }}>
-        <span style={{ fontWeight: 'bold' }}>泰兴市国家统计局公文处理系统</span>
+      <div style={{ height: '64px', background: '#003366', color: '#fff', display: 'flex', alignItems: 'center', padding: '0 24px', gap: '16px' }}>
+        <span style={{ fontWeight: 'bold', fontSize: '18px' }}>泰兴市国家统计局公文处理系统</span>
         <div style={{ flex: 1 }}></div>
         
         <SnapshotRecoveryDrawer docId={currentDocId} />
@@ -157,11 +168,11 @@ export const Workspace: React.FC = () => {
         </div>
 
         <span style={{ fontSize: '12px', opacity: 0.8, marginLeft: '16px' }}>
-          {lockState === 'ACQUIRING' ? '正在获取锁...' : lockState === 'LOCKED' ? '已锁定' : '只读'}
+          {isConflict ? '锁冲突 (只读)' : isImmutable ? '已归档 (只读)' : '已锁定'}
         </span>
       </div>
       
-      <LockConflictBanner lockState={lockState} />
+      <LockConflictBanner lockState={lockState} isImmutable={isImmutable} />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
         {isProcessing && (
