@@ -118,6 +118,14 @@ export const Workspace: React.FC = () => {
             >
                 {isProcessing ? `AI 研读中... ${progress}%` : '✨ AI 智能润色'}
             </Button>
+
+            <Button 
+                style={{ backgroundColor: '#13c2c2', color: '#fff', border: 'none' }} 
+                onClick={() => message.info('GB排版任务已压入队列，请稍后在下载中心查看。')}
+                disabled={isReadOnly || content.length === 0}
+            >
+                GB国标排版并下载
+            </Button>
             
             <Popconfirm 
                 title="确认提交审批？" 

@@ -47,6 +47,10 @@ async def submit_document(
     try:
         await DocumentService.submit_document(db, doc_id, user_id)
         return {"status": "success"}
+    except RuntimeError as e: # 409
+        raise HTTPException(status_code=409, detail=str(e))
+    except PermissionError as e: # 403
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -71,15 +75,36 @@ async def auto_save_document(
 ):
     try:
         payload_keys = payload.model_dump(exclude_unset=True).keys()
-        doc = await DocumentService.auto_save(db, doc_id, payload.content, payload.draft_content, "content" in payload_keys)
+        doc, changed = await DocumentService.auto_save(
+            db, doc_id, payload.content, payload.draft_content, "content" in payload_keys
+        )
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
-        return {"status": "success"}
+        
+        return {
+            "status": "success", 
+            "changed": changed, 
+            "saved_at": doc.updated_at.isoformat() if changed else None
+        }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/{doc_id}/lock")
-async def acquire_document_lock(doc_id: str, user_id: int, username: str):
+async def acquire_document_lock(
+    doc_id: str, 
+    user_id: int, 
+    username: str,
+    role_level: int = 1, # TODO: Mock
+    db: AsyncSession = Depends(get_async_db)
+):
+    # 严格对齐：校验申请人是该公文的 creator_id 或具备审批权限(role>=5)
+    doc = await DocumentService.get_document(db, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    if doc.creator_id != user_id and role_level < 5:
+        raise HTTPException(status_code=403, detail="Permission denied. Creator or approver only.")
+
     token = await LockService.acquire_lock(doc_id, user_id, username)
     if not token:
         raise HTTPException(status_code=409, detail="Document is being edited by another user")
@@ -130,7 +155,7 @@ async def discard_document_polish(
 async def trigger_polish(
     doc_id: str, 
     user_id: int, 
-    lock_token: str, # 颗粒度对齐：必须凭锁触发
+    lock_token: str,
     db: AsyncSession = Depends(get_async_db)
 ):
     # 校验锁持有权
