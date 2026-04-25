@@ -1,9 +1,10 @@
 import React, { useEffect } from 'react';
-import { Button, Spin, Modal, message, Popconfirm } from 'antd';
+import { Button, Spin, Modal, message, Popconfirm, Skeleton } from 'antd';
 import { A4Engine } from '../components/Workspace/A4Engine';
 import { DiffView } from '../components/Workspace/DiffView';
 import { VirtualDocTree } from '../components/Workspace/VirtualDocTree';
 import { ChatPanel } from '../components/Workspace/ChatPanel';
+import { SnapshotRecoveryDrawer } from '../components/Workspace/SnapshotRecoveryDrawer';
 import { useEditorStore } from '../store/useEditorStore';
 import { useLockGuard } from '../hooks/useLockGuard';
 import { useAutoSave } from '../hooks/useAutoSave';
@@ -90,7 +91,7 @@ export const Workspace: React.FC = () => {
         <span style={{ fontWeight: 'bold' }}>泰兴市国家统计局公文处理系统</span>
         <div style={{ flex: 1 }}></div>
         
-        <Button onClick={() => message.info('快照回滚功能规划中')}>历史快照 ⏱</Button>
+        <SnapshotRecoveryDrawer docId={currentDocId} />
 
         {viewMode === 'SINGLE' && (
           <>
@@ -134,14 +135,17 @@ export const Workspace: React.FC = () => {
       <LockConflictBanner lockState={lockState} />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        {/* 骨架安抚动画蒙层 (颗粒度对齐) */}
         {isProcessing && (
           <div style={{ 
             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, 
             backgroundColor: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(2px)', 
-            zIndex: 50, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' 
+            zIndex: 50, display: 'flex', flexDirection: 'column', padding: '100px 150px' 
           }}>
-            <Spin size="large" />
-            <div style={{ marginTop: 20, color: '#003366', fontWeight: 'bold' }}>AI 正在研读台账并组织政务语言，请稍候... ({progress}%)</div>
+            <h3 style={{ color: '#003366', textAlign: 'center', marginBottom: 40 }}>
+              AI 正在研读挂载台账，请稍候... ({progress}%)
+            </h3>
+            <Skeleton active paragraph={{ rows: 15 }} />
           </div>
         )}
 
