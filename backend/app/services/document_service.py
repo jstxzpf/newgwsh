@@ -2,8 +2,8 @@ import hashlib
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
-from app.models.document import Document, DocumentSnapshot
-from app.core.enums import DocumentStatus
+from app.models.document import Document, DocumentSnapshot, WorkflowAudit
+from app.core.enums import DocumentStatus, WorkflowNode
 
 class DocumentService:
     @staticmethod
@@ -51,14 +51,28 @@ class DocumentService:
         )
         db.add(snapshot)
         
-        # 2. 覆盖正文
+        # 2. 确定覆盖正文内容
         content_to_apply = final_content if final_content is not None else doc.ai_polished_content
         if not content_to_apply:
             raise ValueError("No polished content to apply")
+            
+        # 3. 审计写入
+        action_details = {}
+        if final_content is not None and final_content != doc.ai_polished_content:
+            action_details["note"] = "用户接受并修改后应用"
+        else:
+            action_details["note"] = "用户全盘接受 AI 建议"
+            
+        audit = WorkflowAudit(
+            doc_id=doc_id,
+            workflow_node_id=WorkflowNode.POLISH,
+            operator_id=user_id,
+            action_details=action_details
+        )
+        db.add(audit)
         
+        # 4. 执行覆写与状态清理
         doc.content = content_to_apply
-        
-        # 3. 清空 DIFF 状态缓存
         doc.ai_polished_content = None
         doc.draft_suggestion = None
         

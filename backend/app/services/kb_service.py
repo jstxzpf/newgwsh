@@ -3,7 +3,7 @@ import hashlib
 import aiofiles
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from fastapi import UploadFile
 from app.models.knowledge import KnowledgePhysicalFile, KnowledgeBaseHierarchy
 from app.core.enums import KBTier, DataSecurityLevel
@@ -64,3 +64,37 @@ class KBService:
         await db.commit()
         await db.refresh(node)
         return node
+
+    @staticmethod
+    async def delete_kb_node(db: AsyncSession, kb_id: int):
+        """
+        利用 WITH RECURSIVE CTE 找出所有下级，执行双重级联软删除，并剥离向量
+        """
+        # 1. 软删目录树
+        sql = """
+        WITH RECURSIVE target_nodes AS (
+            SELECT kb_id FROM knowledge_base_hierarchy WHERE kb_id = :kb_id
+            UNION ALL
+            SELECT h.kb_id FROM knowledge_base_hierarchy h
+            INNER JOIN target_nodes t ON h.parent_id = t.kb_id
+        )
+        UPDATE knowledge_base_hierarchy 
+        SET is_deleted = TRUE, deleted_at = NOW() 
+        WHERE kb_id IN (SELECT kb_id FROM target_nodes);
+        """
+        await db.execute(text(sql), {"kb_id": kb_id})
+        
+        # 2. 同步软删切片，并将其向量置空以防幽灵检索（双重保险）
+        chunk_sql = """
+        WITH RECURSIVE target_nodes AS (
+            SELECT kb_id FROM knowledge_base_hierarchy WHERE kb_id = :kb_id
+            UNION ALL
+            SELECT h.kb_id FROM knowledge_base_hierarchy h
+            INNER JOIN target_nodes t ON h.parent_id = t.kb_id
+        )
+        UPDATE knowledge_chunks 
+        SET is_deleted = TRUE, embedding = NULL 
+        WHERE kb_id IN (SELECT kb_id FROM target_nodes);
+        """
+        await db.execute(text(chunk_sql), {"kb_id": kb_id})
+        await db.commit()

@@ -11,6 +11,7 @@ from app.tasks.worker import dummy_polish_task
 from app.models.document import AsyncTask
 from app.core.enums import TaskType, TaskStatus
 from app.core.redis import redis_client
+from app.api.dependencies import ai_rate_limiter
 
 router = APIRouter()
 
@@ -81,7 +82,7 @@ async def discard_document_polish(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.post("/{doc_id}/polish")
+@router.post("/{doc_id}/polish", dependencies=[Depends(ai_rate_limiter)])
 async def trigger_polish(doc_id: str, user_id: int, db: AsyncSession = Depends(get_async_db)):
     # 1. 持久化任务记录
     task_id = str(uuid.uuid4())

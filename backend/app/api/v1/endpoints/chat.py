@@ -4,6 +4,7 @@ from app.core.database import get_async_db
 from app.services.chat_service import ChatService
 from pydantic import BaseModel
 from typing import List
+from app.api.dependencies import ai_rate_limiter
 
 router = APIRouter()
 
@@ -11,7 +12,7 @@ class ChatRequest(BaseModel):
     query: str
     context_kb_ids: List[int] = []
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(ai_rate_limiter)])
 async def chat_with_hrag(
     payload: ChatRequest,
     user_id: int = 1, # 临时 Mock

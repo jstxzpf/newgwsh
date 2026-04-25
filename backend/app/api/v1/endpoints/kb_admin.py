@@ -68,3 +68,15 @@ async def get_hierarchy(db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.is_deleted == False))
     nodes = result.scalars().all()
     return {"data": nodes}
+
+@router.delete("/{kb_id}")
+async def delete_knowledge_node(
+    kb_id: int,
+    user_id: int = 1, # TODO: Get from Token
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        await KBService.delete_kb_node(db, kb_id)
+        return {"status": "success", "message": "Node and its children marked as deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
