@@ -5,6 +5,12 @@ from app.services.document_service import DocumentService
 from app.core.locks import LockService
 from pydantic import BaseModel
 from typing import Optional
+import uuid
+import json
+from app.tasks.worker import dummy_polish_task
+from app.models.document import AsyncTask
+from app.core.enums import TaskType, TaskStatus
+from app.core.redis import redis_client
 
 router = APIRouter()
 
@@ -47,3 +53,29 @@ async def heartbeat_document_lock(doc_id: str, lock_token: str):
     if not success:
         raise HTTPException(status_code=409, detail="Lock lost or invalid token")
     return {"status": "success"}
+
+@router.post("/{doc_id}/polish")
+async def trigger_polish(doc_id: str, user_id: int, db: AsyncSession = Depends(get_async_db)):
+    # 1. 持久化任务记录
+    task_id = str(uuid.uuid4())
+    new_task = AsyncTask(
+        task_id=task_id,
+        task_type=TaskType.POLISH,
+        doc_id=doc_id,
+        creator_id=user_id,
+        task_status=TaskStatus.QUEUED
+    )
+    db.add(new_task)
+    await db.commit()
+    
+    # 2. 派发 Celery 任务
+    dummy_polish_task.apply_async(args=[doc_id], task_id=task_id)
+    
+    # 3. 初始状态同步 Redis
+    await redis_client.set(f"task_status:{task_id}", json.dumps({
+        "progress": 0,
+        "status": TaskStatus.QUEUED,
+        "result": None
+    }), ex=3600)
+    
+    return {"task_id": task_id}
