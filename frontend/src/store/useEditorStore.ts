@@ -7,12 +7,14 @@ interface EditorState {
   aiPolishedContent: string | null;
   viewMode: 'SINGLE' | 'DIFF';
   lastSavedHash: string;
+  context_kb_ids: number[];
   
   setDocId: (id: string) => void;
   setContent: (content: string) => void;
   setPolishedContent: (content: string | null) => void;
   setViewMode: (mode: 'SINGLE' | 'DIFF') => void;
   setLastSavedHash: (hash: string) => void;
+  setContextKbIds: (ids: number[]) => void;
   clearEditor: () => void;
 }
 
@@ -24,13 +26,15 @@ export const useEditorStore = create<EditorState>()(
       aiPolishedContent: null,
       viewMode: 'SINGLE',
       lastSavedHash: '',
+      context_kb_ids: [],
       
       setDocId: (id) => set({ currentDocId: id }),
       setContent: (content) => set({ content }),
       setPolishedContent: (content) => set({ aiPolishedContent: content }),
       setViewMode: (mode) => set({ viewMode: mode }),
       setLastSavedHash: (hash) => set({ lastSavedHash: hash }),
-      clearEditor: () => set({ currentDocId: null, content: '', aiPolishedContent: null, viewMode: 'SINGLE' })
+      setContextKbIds: (ids) => set({ context_kb_ids: ids }),
+      clearEditor: () => set({ currentDocId: null, content: '', aiPolishedContent: null, viewMode: 'SINGLE', context_kb_ids: [] })
     }),
     {
       name: 'taixing-editor-storage',

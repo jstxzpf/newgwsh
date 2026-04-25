@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 import { Button, Spin, Modal, message } from 'antd';
 import { A4Engine } from '../components/Workspace/A4Engine';
 import { DiffView } from '../components/Workspace/DiffView';
+import { VirtualDocTree } from '../components/Workspace/VirtualDocTree';
+import { ChatPanel } from '../components/Workspace/ChatPanel';
 import { useEditorStore } from '../store/useEditorStore';
 import { useLockGuard } from '../hooks/useLockGuard';
 import { useAutoSave } from '../hooks/useAutoSave';
@@ -11,7 +13,7 @@ import apiClient from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 
 export const Workspace: React.FC = () => {
-  const { currentDocId, content, aiPolishedContent, setContent, setDocId, viewMode, setViewMode, setPolishedContent } = useEditorStore();
+  const { currentDocId, content, aiPolishedContent, setContent, setDocId, viewMode, setViewMode, setPolishedContent, context_kb_ids } = useEditorStore();
   const userInfo = useAuthStore(state => state.userInfo);
   const { lockState } = useLockGuard(currentDocId);
   useAutoSave(currentDocId, lockState);
@@ -29,7 +31,10 @@ export const Workspace: React.FC = () => {
   const handleTriggerPolish = async () => {
     if (isReadOnly || !currentDocId || !userInfo) return;
     try {
-      const res = await apiClient.post(`/documents/${currentDocId}/polish`, null, {
+      // 携带挂载的上下文 ID
+      const res = await apiClient.post(`/documents/${currentDocId}/polish`, {
+        context_kb_ids: context_kb_ids
+      }, {
         params: { user_id: userInfo.userId }
       });
       watchTask(res.data.task_id, (result) => {
@@ -119,8 +124,8 @@ export const Workspace: React.FC = () => {
           </div>
         )}
 
-        <div style={{ width: '280px', borderRight: '1px solid #d9d9d9', background: '#fff' }}>
-          VirtualDocTree
+        <div style={{ width: '280px', borderRight: '1px solid #d9d9d9', background: '#fff', overflow: 'hidden' }}>
+          <VirtualDocTree />
         </div>
         <div style={{ flex: 1, background: 'var(--bg-workspace)', overflowY: 'auto' }}>
           {viewMode === 'SINGLE' ? (
@@ -139,6 +144,8 @@ export const Workspace: React.FC = () => {
           )}
         </div>
       </div>
+      
+      <ChatPanel />
     </div>
   );
 };
