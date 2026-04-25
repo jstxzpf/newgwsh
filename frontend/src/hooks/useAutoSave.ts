@@ -18,8 +18,12 @@ export const useAutoSave = (docId: string | null, lockState: LockState) => {
     const performSave = async () => {
       const state = stateRef.current;
       
-      // 简单的本地脏检查模拟
-      if (state.content.length === 0 && !state.aiPolishedContent) return; 
+      // 1. 防空保护：如果根本没有内容，不执行无效保存
+      if (!state.content && !state.aiPolishedContent) return;
+      
+      // 2. 本地脏检查：如果与上次保存的指纹相同则跳过 (修复点)
+      const currentFingerprint = `${state.content.length}-${state.viewMode}-${state.aiPolishedContent?.length || 0}`;
+      if (currentFingerprint === state.lastSavedHash) return;
 
       const payload: any = {};
       if (state.viewMode === 'DIFF') {
@@ -30,9 +34,11 @@ export const useAutoSave = (docId: string | null, lockState: LockState) => {
 
       try {
         await apiClient.post(`/documents/${docId}/auto-save`, payload);
-        console.log(`[AutoSave] Success at ${new Date().toLocaleTimeString()}`);
+        // 3. 更新最近保存签章 (修复点)
+        useEditorStore.getState().setLastSavedHash(currentFingerprint);
+        console.log(`[AutoSave] Synced to cloud at ${new Date().toLocaleTimeString()}`);
       } catch (error) {
-        console.error('[AutoSave] Failed:', error);
+        console.error('[AutoSave] Blocked or failed:', error);
       }
     };
 

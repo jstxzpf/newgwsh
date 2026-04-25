@@ -19,7 +19,7 @@ export const useLockGuard = (docId: string | null) => {
     const acquireLock = async () => {
       try {
         setLockState('ACQUIRING');
-        // 1. 获取全局锁配置 (颗粒度对齐)
+        // 1. 获取全局锁配置
         const confRes = await apiClient.get('/locks/config');
         hbInterval = (confRes.data.heartbeat_interval_seconds || 90) * 1000;
 
@@ -54,7 +54,6 @@ export const useLockGuard = (docId: string | null) => {
 
     acquireLock();
 
-    // 3. 休眠/不可见状态唤醒校验 (颗粒度对齐)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && lockTokenRef.current) {
         sendHeartbeat(); // 页面重获焦点时立即探活
@@ -65,11 +64,19 @@ export const useLockGuard = (docId: string | null) => {
     return () => {
       clearInterval(heartbeatTimer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (lockTokenRef.current) {
-        fetch(`/api/v1/documents/${docId}/unlock?lock_token=${lockTokenRef.current}`, {
+      
+      const currentToken = lockTokenRef.current;
+      if (currentToken) {
+        // 构造完整的 URL 与 Headers，防跨域截断 (修复点：显式传递凭证)
+        const authHeader = `Bearer ${useAuthStore.getState().token || ''}`;
+        fetch(`/api/v1/documents/${docId}/unlock?lock_token=${currentToken}`, {
           method: 'POST',
-          keepalive: true
-        }).catch(console.error);
+          keepalive: true,
+          headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/json'
+          }
+        }).catch(() => {}); // 静默处理
       }
     };
   }, [docId, userInfo]);
