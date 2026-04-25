@@ -1,5 +1,9 @@
-import React, { useEffect } from 'react';
-import { Button, Spin, Modal, message, Popconfirm, Skeleton } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Button, Spin, Modal, message, Popconfirm, Skeleton, Badge, Avatar } from 'antd';
+import { 
+  BellOutlined, 
+  UserOutlined 
+} from '@ant-design/icons';
 import { A4Engine } from '../components/Workspace/A4Engine';
 import { DiffView } from '../components/Workspace/DiffView';
 import { VirtualDocTree } from '../components/Workspace/VirtualDocTree';
@@ -24,6 +28,21 @@ export const Workspace: React.FC = () => {
   const isReadOnly = lockState !== 'LOCKED';
   const isProcessing = taskStatus === 'QUEUED' || taskStatus === 'PROCESSING';
   const wordCount = countPureText(content);
+
+  const [sysStatus, setSysStatus] = useState<boolean>(true);
+  useEffect(() => {
+    const probe = async () => {
+      try {
+        const res = await apiClient.get('/sys/status');
+        setSysStatus(res.data.ai_engine_online);
+      } catch (e) {
+        setSysStatus(false);
+      }
+    };
+    probe();
+    const t = setInterval(probe, 30000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     if (!currentDocId) {
@@ -127,6 +146,16 @@ export const Workspace: React.FC = () => {
           </>
         )}
         
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginLeft: '24px' }}>
+          <Badge count={2} size="small" offset={[2, 0]}>
+            <BellOutlined style={{ fontSize: '18px', color: '#fff', cursor: 'pointer' }} />
+          </Badge>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
+            <span style={{ fontSize: '14px' }}>{userInfo?.username}</span>
+          </div>
+        </div>
+
         <span style={{ fontSize: '12px', opacity: 0.8, marginLeft: '16px' }}>
           {lockState === 'ACQUIRING' ? '正在获取锁...' : lockState === 'LOCKED' ? '已锁定' : '只读'}
         </span>
@@ -135,7 +164,6 @@ export const Workspace: React.FC = () => {
       <LockConflictBanner lockState={lockState} />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-        {/* 骨架安抚动画蒙层 (颗粒度对齐) */}
         {isProcessing && (
           <div style={{ 
             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, 
@@ -171,7 +199,7 @@ export const Workspace: React.FC = () => {
       </div>
 
       <div style={{ height: '24px', background: '#f0f2f5', borderTop: '1px solid #d9d9d9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', fontSize: '12px', color: '#888' }}>
-        <span>AI 引擎状态: 🟢 在线</span>
+        <span>AI 引擎状态: {sysStatus ? '🟢 在线' : '🔴 离线'}</span>
         <span>{wordCount} 纯字数 | 泰兴市国家统计局公文处理系统 V3.0</span>
       </div>
       
