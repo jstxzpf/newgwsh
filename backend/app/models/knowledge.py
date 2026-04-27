@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum, BigInt
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum, BigInteger
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -12,7 +12,7 @@ class KnowledgePhysicalFile(Base):
     file_id = Column(Integer, primary_key=True, autoincrement=True)
     content_hash = Column(String(64), unique=True, index=True, nullable=False)
     file_path = Column(String(512), nullable=False)
-    file_size = Column(BigInt, nullable=True)
+    file_size = Column(BigInteger, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
 

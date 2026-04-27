@@ -226,10 +226,13 @@ async def auto_save_document(
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         
+        # 刷新对象以确保属性已加载且未过期（解决 async 环境下的 lazy load 问题）
+        await db.refresh(doc)
+        
         return {
             "status": "success", 
             "changed": changed, 
-            "saved_at": doc.updated_at.isoformat() if changed else None
+            "saved_at": doc.updated_at.isoformat() if doc.updated_at else None
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
