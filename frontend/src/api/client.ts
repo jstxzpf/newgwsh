@@ -1,9 +1,10 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/useAuthStore';
+import { appConfig } from '../config';
 
 const apiClient = axios.create({
-  baseURL: '/api/v1',
-  timeout: 10000,
+  baseURL: appConfig.apiBaseURL,
+  timeout: appConfig.axiosTimeout,
 });
 
 apiClient.interceptors.request.use((config) => {

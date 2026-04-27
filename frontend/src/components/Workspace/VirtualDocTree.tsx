@@ -3,6 +3,7 @@ import { Tree, message, Spin } from 'antd';
 import type { TreeDataNode } from 'antd';
 import { useEditorStore } from '../../store/useEditorStore';
 import apiClient from '../../api/client';
+import { appConfig } from '../../config';
 
 export const VirtualDocTree: React.FC = () => {
   const [treeData, setTreeData] = useState<TreeDataNode[]>([]);
@@ -15,10 +16,11 @@ export const VirtualDocTree: React.FC = () => {
       try {
         const res = await apiClient.get('/kb/hierarchy');
         // 简单转换为 AntD Tree 格式
-        const nodes = res.data.data.map((item: any) => ({
+        const nodes = res.data.map((item: any) => ({
           title: item.kb_name,
           key: item.kb_id.toString(), // Tree 要求 key 为 string
           isLeaf: item.kb_type === 'FILE',
+          disabled: item.kb_type === 'FILE' && item.parse_status !== 'READY',
         }));
         setTreeData(nodes);
       } catch (e) {
@@ -63,7 +65,7 @@ export const VirtualDocTree: React.FC = () => {
               whiteSpace: 'nowrap', 
               overflow: 'hidden',
               display: 'inline-block',
-              maxWidth: '180px', // 颗粒度对齐：强制截断保护
+              maxWidth: appConfig.virtualTreeMaxWidth, // 颗粒度对齐：强制截断保护
               verticalAlign: 'middle'
             }} 
             title={nodeData.title as string}

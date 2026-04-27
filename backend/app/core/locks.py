@@ -1,12 +1,13 @@
 import uuid
 import json
 from datetime import datetime
-from app.core.redis import redis_client
+from app.core.redis import get_redis
 from app.core.config import settings
 
 class LockService:
     @staticmethod
     async def acquire_lock(doc_id: str, user_id: int, username: str) -> str | None:
+        redis_client = await get_redis()
         lock_key = f"lock:{doc_id}"
         token = str(uuid.uuid4())
         lock_data = {
@@ -26,6 +27,7 @@ class LockService:
 
     @staticmethod
     async def release_lock(doc_id: str, token: str) -> bool:
+        redis_client = await get_redis()
         lock_key = f"lock:{doc_id}"
         current_lock = await redis_client.get(lock_key)
         if not current_lock:
@@ -39,6 +41,7 @@ class LockService:
 
     @staticmethod
     async def heartbeat(doc_id: str, token: str) -> bool:
+        redis_client = await get_redis()
         lock_key = f"lock:{doc_id}"
         current_lock = await redis_client.get(lock_key)
         if not current_lock:

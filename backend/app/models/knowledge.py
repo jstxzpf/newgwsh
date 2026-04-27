@@ -29,9 +29,11 @@ class KnowledgeBaseHierarchy(Base):
     parse_status = Column(String(64), nullable=False, default="READY")
     physical_file_id = Column(Integer, ForeignKey("knowledge_physical_files.file_id"), index=True, nullable=True)
     owner_id = Column(Integer, ForeignKey("system_users.user_id"), index=True, nullable=False)
+    file_version = Column(Integer, default=1, nullable=False)
     is_deleted = Column(Boolean, nullable=False, default=False)
     deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=True)
 
 
 class KnowledgeChunk(Base):

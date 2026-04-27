@@ -2,6 +2,7 @@ import os
 import hashlib
 import aiofiles
 from typing import Optional
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from fastapi import UploadFile
@@ -50,7 +51,8 @@ class KBService:
         user_id: int,
         dept_id: Optional[int] = None,
         kb_tier: KBTier = KBTier.PERSONAL,
-        security_level: DataSecurityLevel = DataSecurityLevel.GENERAL
+        security_level: DataSecurityLevel = DataSecurityLevel.GENERAL,
+        parent_id: Optional[int] = None
     ) -> KnowledgeBaseHierarchy:
         node = KnowledgeBaseHierarchy(
             kb_name=filename,
@@ -60,12 +62,75 @@ class KBService:
             dept_id=dept_id,
             parse_status="UPLOADED",
             physical_file_id=phys_id,
-            owner_id=user_id
+            owner_id=user_id,
+            parent_id=parent_id
         )
         db.add(node)
         await db.commit()
         await db.refresh(node)
         return node
+
+    @staticmethod
+    async def replace_kb_node(
+        db: AsyncSession,
+        kb_id: int,
+        filename: str,
+        phys_id: int,
+        user_id: int
+    ):
+        stmt = select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.kb_id == kb_id)
+        result = await db.execute(stmt)
+        node = result.scalars().first()
+        if not node:
+            return None
+            
+        # 更新节点信息
+        node.kb_name = filename
+        node.physical_file_id = phys_id
+        node.parse_status = "PARSING"
+        node.file_version += 1 # 【对齐修复】版本自增
+        node.updated_at = datetime.now()
+        
+        # 联动清理旧的切片（防止幽灵检索）
+        chunk_sql = "UPDATE knowledge_chunks SET is_deleted = TRUE, embedding = NULL WHERE kb_id = :kb_id"
+        await db.execute(text(chunk_sql), {"kb_id": kb_id})
+        
+        await db.commit()
+        return node
+
+    @staticmethod
+    async def get_or_create_directory(
+        db: AsyncSession,
+        name: str,
+        parent_id: Optional[int],
+        user_id: int,
+        dept_id: Optional[int],
+        kb_tier: KBTier
+    ) -> KnowledgeBaseHierarchy:
+        stmt = select(KnowledgeBaseHierarchy).where(
+            KnowledgeBaseHierarchy.kb_name == name,
+            KnowledgeBaseHierarchy.parent_id == parent_id,
+            KnowledgeBaseHierarchy.kb_type == "DIRECTORY",
+            KnowledgeBaseHierarchy.is_deleted == False
+        )
+        result = await db.execute(stmt)
+        directory = result.scalars().first()
+        
+        if not directory:
+            directory = KnowledgeBaseHierarchy(
+                kb_name=name,
+                kb_type="DIRECTORY",
+                kb_tier=kb_tier,
+                dept_id=dept_id,
+                owner_id=user_id,
+                parent_id=parent_id,
+                parse_status="READY" # 目录无需解析
+            )
+            db.add(directory)
+            await db.commit()
+            await db.refresh(directory)
+            
+        return directory
 
     @staticmethod
     async def delete_kb_node(db: AsyncSession, kb_id: int):

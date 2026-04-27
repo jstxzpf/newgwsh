@@ -16,12 +16,10 @@ export const SnapshotRecoveryDrawer: React.FC<Props> = ({ docId }) => {
   const fetchSnapshots = async () => {
     if (!docId) return;
     try {
-      // Mock data for snapshots as per spec
-      const mockData = [
-        { id: 101, created_at: new Date(Date.now() - 3600000).toISOString(), trigger_event: 'accept_polish' },
-        { id: 102, created_at: new Date(Date.now() - 7200000).toISOString(), trigger_event: 'auto_save' }
-      ];
-      setSnapshots(mockData);
+      const res = await apiClient.get(`/documents/${docId}/snapshots`, {
+        params: { page: 1, page_size: 20 }
+      });
+      setSnapshots(res.data.data);
     } catch (e) {
       message.error('拉取快照失败');
     }
@@ -32,10 +30,17 @@ export const SnapshotRecoveryDrawer: React.FC<Props> = ({ docId }) => {
     fetchSnapshots();
   };
 
-  const handleRestore = async (id: number) => {
-    // TODO: Implement actual restore logic
-    message.success(`快照 #${id} 内容已恢复至当前画板`);
-    setVisible(false);
+  const handleRestore = async (id: number, content: string) => {
+    if (!docId) return;
+    try {
+      // 【对齐修复】增加二次确认参数
+      await apiClient.post(`/documents/${docId}/snapshots/${id}/restore?confirm=CONFIRMED`);
+      setContent(content);
+      message.success(`快照 #${id} 内容已恢复至当前画板`);
+      setVisible(false);
+    } catch (e) {
+      message.error('云端恢复失败，请稍后重试');
+    }
   };
 
   return (
@@ -55,7 +60,7 @@ export const SnapshotRecoveryDrawer: React.FC<Props> = ({ docId }) => {
           dataSource={snapshots}
           renderItem={item => (
             <List.Item actions={[
-              <Popconfirm title="确定覆盖当前画板吗？" onConfirm={() => handleRestore(item.id)}>
+              <Popconfirm title="确定覆盖当前画板吗？" onConfirm={() => handleRestore(item.snapshot_id || item.id, item.content)}>
                 <Button type="link" size="small">恢复</Button>
               </Popconfirm>
             ]}>

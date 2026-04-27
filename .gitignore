@@ -27,6 +27,13 @@ backend/data/outputs/*
 !backend/data/uploads/.gitkeep
 !backend/data/outputs/.gitkeep
 
+# Local agent state
+.agent/
+
+# Python cache
+**/__pycache__/
+**/*.py[cod]
+
 # IDE
 .vscode/
 .idea/

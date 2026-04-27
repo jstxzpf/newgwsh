@@ -17,8 +17,26 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   token: null,
-  userInfo: { userId: 1, username: '测试科员', deptName: '综合科', roleLevel: 1 }, // 模拟初始状态
+  userInfo: null, 
   setToken: (token) => set({ token }),
   setUserInfo: (info) => set({ userInfo: info }),
-  logout: () => set({ token: null, userInfo: null }),
+  logout: () => {
+    // 【对齐修复】登出时全量清理持久化及锁缓存
+    for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key?.startsWith('lock_token:')) {
+            const docId = key.replace('lock_token:', '');
+            const tokenVal = sessionStorage.getItem(key);
+            if (tokenVal) {
+                // 静默释放锁
+                fetch(`/api/v1/locks/release?doc_id=${docId}&lock_token=${tokenVal}`, {
+                    method: 'POST',
+                    keepalive: true,
+                    headers: { 'Authorization': `Bearer ${useAuthStore.getState().token}` }
+                }).catch(() => {});
+            }
+        }
+    }
+    set({ token: null, userInfo: null });
+  },
 }));

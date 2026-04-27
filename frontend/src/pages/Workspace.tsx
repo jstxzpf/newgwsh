@@ -17,10 +17,11 @@ import { countPureText } from '../utils/wordCount';
 export const Workspace: React.FC = () => {
   const { currentDocId, content, aiPolishedContent, setContent, setDocId, viewMode, setViewMode, setPolishedContent, context_kb_ids } = useEditorStore();
   const userInfo = useAuthStore(state => state.userInfo);
-  const { lockState } = useLockGuard(currentDocId);
-  useAutoSave(currentDocId, lockState);
+  const { lockState, lockToken } = useLockGuard(currentDocId);
+  useAutoSave(currentDocId, lockState, lockToken);
   
   const [docStatus, setDocStatus] = useState<string>('DRAFTING');
+  const [initialLoading, setInitialLoading] = useState(true); // 【对齐修复】消除漫游恢复闪烁
   const { watchTask, taskStatus, progress } = useTaskWatcher();
   
   const isConflict = lockState === 'READONLY_CONFLICT';
@@ -38,19 +39,41 @@ export const Workspace: React.FC = () => {
 
   useEffect(() => {
     if (currentDocId) {
+        setInitialLoading(true);
         apiClient.get(`/documents/${currentDocId}`).then(res => {
-            if (res.data) setDocStatus(res.data.status);
-        }).catch(() => {});
+            if (res.data) {
+                const doc = res.data;
+                setDocStatus(doc.status);
+                
+                // 漫游状态恢复逻辑 (对齐基准：原子化更新防止闪烁)
+                const newContent = doc.content || '';
+                let newPolishedContent = null;
+                let newViewMode: 'SINGLE' | 'DIFF' = 'SINGLE';
+
+                if (doc.ai_polished_content) {
+                    newPolishedContent = doc.draft_suggestion || doc.ai_polished_content;
+                    newViewMode = 'DIFF';
+                }
+
+                setContent(newContent);
+                setPolishedContent(newPolishedContent);
+                setViewMode(newViewMode);
+            }
+        }).catch(() => {
+            message.error('获取公文详情失败，请检查网络或权限');
+        }).finally(() => {
+            setInitialLoading(false);
+        });
     }
   }, [currentDocId]);
 
   const handleTriggerPolish = async () => {
-    if (isReadOnly || !currentDocId || !userInfo) return;
+    if (isReadOnly || !currentDocId || !userInfo || !lockToken) return;
     try {
       const res = await apiClient.post(`/documents/${currentDocId}/polish`, {
         context_kb_ids: context_kb_ids
       }, {
-        params: { user_id: userInfo.userId }
+        params: { lock_token: lockToken } // 移除外部 user_id，由后端从 Token 提取
       });
       watchTask(res.data.task_id, (result) => {
         setPolishedContent(result);
@@ -63,10 +86,12 @@ export const Workspace: React.FC = () => {
   };
 
   const handleApplyPolish = async () => {
-    if (!currentDocId) return;
+    if (!currentDocId || !lockToken) return;
     try {
       await apiClient.post(`/documents/${currentDocId}/apply-polish`, {
         final_content: aiPolishedContent
+      }, {
+        params: { lock_token: lockToken }
       });
       setContent(aiPolishedContent || '');
       setViewMode('SINGLE');
@@ -83,7 +108,9 @@ export const Workspace: React.FC = () => {
       await apiClient.post(`/documents/${currentDocId}/discard-polish`);
       setViewMode('SINGLE');
       setPolishedContent(null);
-      message.info('已丢弃润色建议');
+      // 【级联修复】丢弃润色时清理可能存在的持久化脏数据
+      localStorage.removeItem('taixing-editor-storage'); 
+      message.info('已丢弃润色建议并清理本地缓存');
     } catch (err) {
       message.error('操作失败');
     }
@@ -99,6 +126,14 @@ export const Workspace: React.FC = () => {
       }
   };
 
+  if (initialLoading) {
+    return (
+      <div style={{ padding: 24 }}>
+        <Skeleton active paragraph={{ rows: 10 }} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* 次级指挥带 (蓝色) */}
@@ -111,7 +146,7 @@ export const Workspace: React.FC = () => {
           <>
             <Button 
                 type="primary" 
-                style={{ backgroundColor: '#722ed1', border: 'none' }} 
+                style={{ background: 'linear-gradient(135deg, #722ed1, #faad14)', border: 'none' }} 
                 onClick={handleTriggerPolish}
                 loading={isProcessing}
                 disabled={isReadOnly || content.length === 0}
@@ -120,7 +155,7 @@ export const Workspace: React.FC = () => {
             </Button>
 
             <Button 
-                style={{ backgroundColor: '#13c2c2', color: '#fff', border: 'none' }} 
+                style={{ backgroundColor: '#08979c', color: '#fff', border: 'none' }} 
                 onClick={() => message.info('GB排版任务已压入队列，请稍后在下载中心查看。')}
                 disabled={isReadOnly || content.length === 0}
             >
@@ -175,7 +210,9 @@ export const Workspace: React.FC = () => {
             <A4Engine>
               <textarea 
                 value={content || ''}
-                onChange={(e) => setContent(e.target.value)}
+                onChange={(e) => {
+                  if (!isReadOnly) setContent(e.target.value);
+                }}
                 disabled={isReadOnly}
                 style={{ width: '100%', height: '100%', minHeight: '1000px', border: 'none', resize: 'none', outline: 'none', backgroundColor: 'transparent', cursor: isReadOnly ? 'not-allowed' : 'text', color: isReadOnly ? '#555' : 'inherit' }}
                 placeholder={isReadOnly ? "只读模式，无法编辑..." : "请在此输入公文正文..."}

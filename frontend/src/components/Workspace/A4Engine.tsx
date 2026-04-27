@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './A4Engine.css';
+import { appConfig } from '../../config';
 
 interface A4EngineProps {
   children: React.ReactNode;
@@ -13,12 +14,12 @@ export const A4Engine: React.FC<A4EngineProps> = ({ children }) => {
     const calculateScale = () => {
       if (containerRef.current) {
         const containerWidth = containerRef.current.clientWidth;
-        // 794 (A4) + 180 (安全边距预留)
-        let newScale = containerWidth / (794 + 180);
+        // 794 (A4) + 安全边距从配置中心读取
+        let newScale = containerWidth / (794 + appConfig.a4Engine.safetyMargin);
         // 最小缩放防畸变
-        if (newScale < 0.5) newScale = 0.5;
+        if (newScale < appConfig.a4Engine.scaleMin) newScale = appConfig.a4Engine.scaleMin;
         // 最大缩放限制
-        if (newScale > 1.2) newScale = 1.2;
+        if (newScale > appConfig.a4Engine.scaleMax) newScale = appConfig.a4Engine.scaleMax;
         setScale(newScale);
       }
     };

@@ -40,11 +40,9 @@ export const useEditorStore = create<EditorState>()(
       name: 'taixing-editor-storage',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({ 
-        content: state.content, 
-        aiPolishedContent: state.aiPolishedContent,
         viewMode: state.viewMode,
         currentDocId: state.currentDocId
-      }), // 仅缓存恢复必需字段
+      }), // 仅缓存 UI 状态，不缓存公文正文明文以防泄密
     }
   )
 );

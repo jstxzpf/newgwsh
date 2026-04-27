@@ -12,9 +12,15 @@ class RoutingGuardMiddleware(BaseHTTPMiddleware):
         if not settings.ALLOWED_SUBNETS:
             return await call_next(request)
             
-        client_ip = request.client.host if request.client else None
-        
+        # 优先从 X-Forwarded-For 提取真实客户端 IP (支持 Nginx 等反向代理)
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            client_ip = forwarded_for.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else None
+
         if not client_ip:
+
             return JSONResponse(status_code=403, content={"detail": "无法识别客户端 IP"})
             
         is_allowed = False
@@ -43,7 +49,8 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             trace_id=trace_id,
             client_ip=request.client.host if request.client else "unknown",
             method=request.method,
-            path=request.url.path
+            path=request.url.path,
+            user_id="anonymous" # 初始占位
         )
         
         response = await call_next(request)

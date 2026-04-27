@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { appConfig } from '../../config';
 
 interface WatermarkProps {
   username: string;
@@ -6,16 +7,10 @@ interface WatermarkProps {
 }
 
 export const AntiLeakWatermark: React.FC<WatermarkProps> = ({ username, department }) => {
-  const [timeStr, setTimeStr] = useState('');
-
-  useEffect(() => {
-    const update = () => setTimeStr(new Date().toISOString().slice(0, 19).replace('T', ' '));
-    update();
-    const timer = setInterval(update, 60000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const watermarkText = `${department} - ${username} - ${timeStr}`;
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const timeStr = now.toTimeString().slice(0, 5); // 获取 HH:mm
+  const watermarkText = `${department} - ${username} - ${dateStr} ${timeStr}`;
 
   return (
     <div 
@@ -25,10 +20,10 @@ export const AntiLeakWatermark: React.FC<WatermarkProps> = ({ username, departme
         pointerEvents: 'none',
         zIndex: 9999,
         overflow: 'hidden',
-        opacity: 0.08,
+        opacity: appConfig.watermark.opacity,
         display: 'flex',
         flexWrap: 'wrap',
-        transform: 'rotate(-20deg) scale(1.5)',
+        transform: `rotate(${appConfig.watermark.rotation}) scale(1.5)`,
         justifyContent: 'center',
         alignItems: 'center',
         gap: '100px'

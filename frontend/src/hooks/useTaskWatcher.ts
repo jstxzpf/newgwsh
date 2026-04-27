@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
+import { appConfig } from '../config';
 
 export type TaskStatus = 'IDLE' | 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
@@ -18,45 +19,56 @@ export const useTaskWatcher = () => {
     setTaskStatus('QUEUED');
     setProgress(0);
 
-    try {
-      // 1. 换取 Ticket
-      const ticketRes = await apiClient.post('/sse/ticket', null, {
-        params: { task_id: taskId, user_id: userInfo.userId }
-      });
-      const ticket = ticketRes.data.ticket;
-
-      // 2. 建立 SSE 连接
-      const es = new EventSource(`/api/v1/sse/${taskId}/events?ticket=${ticket}`);
-      activeEventSource.current = es;
-
-      es.onmessage = (event) => {
+    let retryCount = 0;
+    const connect = async () => {
         try {
-          const data = JSON.parse(event.data);
-          setProgress(data.progress);
-          setTaskStatus(data.status);
-          
-          if (data.status === 'COMPLETED') {
-            setResult(data.result);
-            es.close();
-            if (onComplete && data.result) onComplete(data.result);
-          } else if (data.status === 'FAILED') {
-            es.close();
-          }
-        } catch (e) {
-          console.error('Failed to parse SSE event:', e);
-        }
-      };
+          // 1. 换取 Ticket
+          const ticketRes = await apiClient.post('/sse/ticket', null, {
+            params: { task_id: taskId }
+          });
+          const ticket = ticketRes.data.ticket;
 
-      es.onerror = (err) => {
-        console.error('SSE connection error:', err);
-        es.close();
-        setTaskStatus('FAILED');
-      };
-      
-    } catch (err) {
-      console.error('Failed to get SSE ticket:', err);
-      setTaskStatus('FAILED');
-    }
+          // 2. 建立 SSE 连接
+          const es = new EventSource(`/api/v1/sse/${taskId}/events?ticket=${ticket}`);
+          activeEventSource.current = es;
+
+          es.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              setProgress(data.progress);
+              setTaskStatus(data.status);
+              
+              if (data.status === 'COMPLETED') {
+                setResult(data.result);
+                es.close();
+                if (onComplete && data.result) onComplete(data.result);
+              } else if (data.status === 'FAILED') {
+                es.close();
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE event:', e);
+            }
+          };
+
+          es.onerror = (err) => {
+            console.error('SSE connection error:', err);
+            es.close();
+            retryCount++;
+            if (retryCount <= appConfig.sseMaxRetries) {
+                console.log(`Retrying SSE connection (${retryCount}/${appConfig.sseMaxRetries})...`);
+                setTimeout(connect, appConfig.sseRetryDelayBase * retryCount);
+            } else {
+                setTaskStatus('FAILED');
+            }
+          };
+          
+        } catch (err) {
+          console.error('Failed to get SSE ticket:', err);
+          setTaskStatus('FAILED');
+        }
+    };
+    
+    connect();
   };
 
   useEffect(() => {

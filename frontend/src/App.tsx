@@ -23,6 +23,11 @@ import { GlobalTaskWatcher } from './components/GlobalTaskWatcher';
 import apiClient from './api/client';
 import './styles/global.css';
 
+import { Login } from './pages/Login';
+import { ProtectedRoute } from './components/Auth/ProtectedRoute';
+
+import { appConfig } from './config';
+
 const { Header, Sider, Content, Footer } = Layout;
 
 const GlobalLayout = () => {
@@ -42,12 +47,13 @@ const GlobalLayout = () => {
       }
     };
     probe();
-    const t = setInterval(probe, 60000);
+    // 使用配置定义的探针间隔
+    const t = setInterval(probe, appConfig.sysProbeInterval);
     return () => clearInterval(t);
   }, []);
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout style={{ minHeight: '100vh' }} aria-label="全站主布局容器">
       <Sider width={240} style={{ background: '#003366' }}>
         <div style={{ height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
           <img src="/vite.svg" alt="logo" style={{ width: 24, height: 24, marginRight: 8 }}/>
@@ -128,7 +134,14 @@ function App() {
       <GlobalTaskWatcher />
       {userInfo && <AntiLeakWatermark username={userInfo.username} department={userInfo.deptName} />}
       <Router>
-        <GlobalLayout />
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/*" element={
+            <ProtectedRoute>
+              <GlobalLayout />
+            </ProtectedRoute>
+          } />
+        </Routes>
       </Router>
     </ConfigProvider>
   );

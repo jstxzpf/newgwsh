@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Upload, Tag, message, Layout, Typography, Tabs } from 'antd';
-import { UploadOutlined, FileTextOutlined, LockOutlined } from '@ant-design/icons';
+import { Table, Button, Upload, Tag, message, Layout, Typography, Tabs, Popconfirm } from 'antd';
+import { UploadOutlined, FileTextOutlined, LockOutlined, DeleteOutlined } from '@ant-design/icons';
 import apiClient from '../api/client';
 import { useTaskWatcher } from '../hooks/useTaskWatcher';
 import { useAuthStore } from '../store/useAuthStore';
+import { appConfig } from '../config';
 
 const { Header, Content } = Layout;
 const { Title } = Typography;
@@ -30,12 +31,22 @@ export const KnowledgeBase: React.FC = () => {
     fetchHierarchy();
   }, []);
 
+  const handleDelete = async (kbId: number) => {
+      try {
+          await apiClient.delete(`/kb/${kbId}`);
+          message.success('资产已移入回收站');
+          fetchHierarchy();
+      } catch (err) {
+          message.error('删除失败，权限不足');
+      }
+  };
+
   const handleUpload = async (options: any, tier: string) => {
     const { file, onSuccess, onError } = options;
     const formData = new FormData();
     formData.append('file', file);
     formData.append('kb_tier', tier);
-    formData.append('security_level', 'GENERAL'); // 默认一般
+    formData.append('security_level', 'GENERAL'); 
 
     try {
       const res = await apiClient.post('/kb/upload', formData, {
@@ -67,7 +78,7 @@ export const KnowledgeBase: React.FC = () => {
       dataIndex: 'kb_tier',
       key: 'kb_tier',
       render: (tier: string) => (
-        <Tag color={tier === 'BASE' ? 'blue' : tier === 'DEPT' ? 'purple' : 'default'}>{tier}</Tag>
+        <Tag color={tier === 'BASE' ? 'blue' : tier === 'DEPT' ? 'cyan' : 'default'}>{tier}</Tag>
       )
     },
     {
@@ -93,11 +104,14 @@ export const KnowledgeBase: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      render: () => <Button type="link" size="small" danger>软删除</Button>
+      render: (_: any, record: any) => (
+        <Popconfirm title="确定要软删除此资产吗？" onConfirm={() => handleDelete(record.kb_id)}>
+            <Button type="link" size="small" danger icon={<DeleteOutlined />}>软删除</Button>
+        </Popconfirm>
+      )
     }
   ];
 
-  // 按类型过滤数据
   const personalData = data.filter(d => d.kb_tier === 'PERSONAL');
   const deptData = data.filter(d => d.kb_tier === 'DEPT');
   const baseData = data.filter(d => d.kb_tier === 'BASE');
@@ -119,11 +133,10 @@ export const KnowledgeBase: React.FC = () => {
           </Button>
         </Upload>
       </div>
-      <Table columns={columns} dataSource={tierData} rowKey="kb_id" loading={loading} pagination={{ pageSize: 10 }} />
+      <Table columns={columns} dataSource={tierData} rowKey="kb_id" loading={loading} pagination={{ pageSize: appConfig.knowledgePageSize }} />
     </div>
   );
 
-  // 权限控制：科长(>=5)可传DEPT，管理员(>=99)可传BASE
   const role = userInfo?.roleLevel || 1;
 
   const tabItems = [
@@ -133,7 +146,7 @@ export const KnowledgeBase: React.FC = () => {
   ];
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout style={{ minHeight: '100vh' }} aria-label="知识库管理容器">
       <Header style={{ background: '#ffffff', borderBottom: '1px solid #f0f0f0', padding: '0 24px', display: 'flex', alignItems: 'center' }}>
         <h2 style={{ color: '#003366', margin: 0, fontSize: '18px', fontWeight: 'bold' }}>统计知识资产库 (KB Admin)</h2>
       </Header>

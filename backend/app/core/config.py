@@ -37,7 +37,34 @@ class Settings(BaseSettings):
     RETRY_BACKOFF_MAX_SECONDS: int = 30
     
     # AI 引擎配置 (颗粒度对齐)
+    OLLAMA_BASE_URL: str = "http://10.132.60.133:11434"
     OLLAMA_MODEL: str = "gemma4:e4b"
+    AI_RATE_LIMIT_REQUESTS: int = 5
+    AI_RATE_LIMIT_WINDOW_SECONDS: int = 60
+
+    # 文件存储
+    UPLOAD_DIR: str = "data/uploads"
+    ARCHIVE_ROOT: str = "data/archive"
+
+    # 任务重试与调度策略
+    MAX_TASK_RETRY_COUNT: int = 3
+    CELERY_CLEANUP_CRONTAB_HOUR: int = 3
+    CELERY_CLEANUP_CRONTAB_MINUTE: int = 0
+    OLLAMA_REQUEST_TIMEOUT: int = 120
+
+    # 业务默认值与上限
+    DEFAULT_PAGE_SIZE: int = 20
+    MAX_AUDIT_LOG_LIMIT: int = 50
+    SSE_TICKET_TTL_SECONDS: int = 15
+    SSE_POLL_INTERVAL_SECONDS: float = 0.5
+
+    # RAG 检索参数
+    RAG_VECTOR_TOP_K: int = 20
+    RAG_BM25_TOP_K: int = 20
+    RAG_RRF_K: int = 60
+    RAG_VECTOR_SIMILARITY_THRESHOLD: float = 0.7
+    RAG_TOP_K_FINAL: int = 5
+    FULLTEXT_SEARCH_CONFIG: str = "zhparser"
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
