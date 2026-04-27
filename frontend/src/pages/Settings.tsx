@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Layout, Typography, Tabs, Table, Card, Button, message, Tag, Space } from 'antd';
+import { Layout, Typography, Tabs, Table, Card, Button, message, Tag, Space, Form, InputNumber } from 'antd';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -11,6 +11,7 @@ export const Settings: React.FC = () => {
   const [userList, setUserList] = useState([]);
   const [locks, setLocks] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [infraConfig, setInfraConfig] = useState({ lock_ttl: 180, sse_retries: 3 });
 
   const fetchUsers = async () => {
     try {
@@ -21,7 +22,6 @@ export const Settings: React.FC = () => {
 
   const fetchLocks = async () => {
     try {
-      // 假设后端有 /locks/active 端点展示 Redis 锁
       const res = await apiClient.get('/locks/active');
       setLocks(res.data);
     } catch (e) { /* 后端若未实现则跳过 */ }
@@ -35,12 +35,21 @@ export const Settings: React.FC = () => {
   };
 
   useEffect(() => {
-    if (userInfo?.roleLevel >= 99) {
+    if ((userInfo?.roleLevel ?? 0) >= 99) {
       fetchUsers();
       fetchLocks();
       fetchAudit();
     }
   }, [userInfo]);
+
+  const handleUpdateInfra = async (values: any) => {
+    try {
+        await apiClient.put('/sys/config', values);
+        message.success('系统动态配置已刷新');
+    } catch (e) {
+        message.error('配置更新失败');
+    }
+  };
 
   const userColumns = [
     { title: '工号', dataIndex: 'user_id', key: 'user_id' },
@@ -50,7 +59,7 @@ export const Settings: React.FC = () => {
     { title: '状态', dataIndex: 'is_active', key: 'is_active', render: (active: boolean) => active ? <Tag color="green">激活</Tag> : <Tag color="red">禁用</Tag> }
   ];
 
-  if (!userInfo || userInfo.roleLevel < 99) {
+  if (!userInfo || (userInfo.roleLevel ?? 0) < 99) {
       return (
           <Layout style={{ padding: 48, textAlign: 'center' }}>
               <Title level={4} type="danger">权限不足：系统中枢设置台仅对系统管理员开放。</Title>
@@ -93,6 +102,32 @@ export const Settings: React.FC = () => {
                 locale={{ emptyText: '当前集群无活跃死锁' }}
             />
           </Card>
+        </TabPane>
+
+        <TabPane tab="系统基建配置" key="4">
+            <Card title="全局基建动态嗅探控制">
+                <Form 
+                    layout="vertical" 
+                    initialValues={infraConfig}
+                    onFinish={handleUpdateInfra}
+                    style={{ maxWidth: '400px' }}
+                >
+                    <Form.Item label="编辑锁 TTL (秒)" name="lock_ttl">
+                        <InputNumber style={{ width: '100%' }} min={60} max={3600} />
+                    </Form.Item>
+                    <Form.Item label="SSE 最大重试次数" name="sse_retries">
+                        <InputNumber style={{ width: '100%' }} min={1} max={10} />
+                    </Form.Item>
+                    <Form.Item>
+                        <Button type="primary" htmlType="submit">保存并刷新配置</Button>
+                    </Form.Item>
+                </Form>
+                <div style={{ marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '20px' }}>
+                    <Button onClick={() => apiClient.post('/sys/cleanup-cache').then(() => message.success('清理任务已触发'))}>
+                        立即触发全局缓存清理 (Temp Files & Redis)
+                    </Button>
+                </div>
+            </Card>
         </TabPane>
       </Tabs>
     </Layout>

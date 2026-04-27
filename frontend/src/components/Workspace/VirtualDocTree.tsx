@@ -32,9 +32,10 @@ export const VirtualDocTree: React.FC = () => {
     fetchTree();
   }, []);
 
-  const onCheck = (checkedKeys: any) => {
-    // 提取数字 ID
-    const ids = checkedKeys.map((k: string) => parseInt(k, 10)).filter((k: number) => !isNaN(k));
+  const onCheck = (checkedKeysValue: any) => {
+    // 处理 AntD Tree onCheck 返回的多态类型 (Key[] | { checked: Key[]; halfChecked: Key[] })
+    const keys = Array.isArray(checkedKeysValue) ? checkedKeysValue : checkedKeysValue.checked;
+    const ids = keys.map((k: string) => parseInt(k, 10)).filter((k: number) => !isNaN(k));
     setContextKbIds(ids);
   };
 

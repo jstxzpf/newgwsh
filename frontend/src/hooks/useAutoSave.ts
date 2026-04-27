@@ -3,6 +3,7 @@ import apiClient from '../api/client';
 import { useEditorStore } from '../store/useEditorStore';
 import { LockState } from './useLockGuard';
 import { message } from 'antd';
+import { appConfig } from '../config';
 
 async function sha256(message: string): Promise<string> {
   const msgBuffer = new TextEncoder().encode(message);
@@ -60,7 +61,22 @@ export const useAutoSave = (docId: string | null, lockState: LockState, lockToke
 
     // 自动保存频率从配置中心读取
     const timer = setInterval(performSave, appConfig.autoSaveInterval);
-    return () => clearInterval(timer);
-  }, [docId, lockState, lockToken]);
+    
+    // 【对齐修复】注册页面关闭/刷新前的最后一次保存与锁释放
+    const handleBeforeUnload = () => {
+        performSave();
+        // 这是一个同步阻塞请求的近似实现，或者通过 Beacon API 发送
+        if (docId && lockToken) {
+            const url = `${appConfig.apiBaseUrl}/locks/release?doc_id=${docId}&token=${lockToken}`;
+            navigator.sendBeacon(url);
+        }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+        clearInterval(timer);
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [docId, lockState, lockToken, content, draftContent]);
 };
 

@@ -3,6 +3,7 @@ import { create } from 'zustand';
 interface UserInfo {
   userId: number;
   username: string;
+  deptId: number;
   deptName: string;
   roleLevel: number;
 }

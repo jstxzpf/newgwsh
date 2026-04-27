@@ -9,7 +9,9 @@ from fastapi import UploadFile
 from app.models.knowledge import KnowledgePhysicalFile, KnowledgeBaseHierarchy
 from app.core.enums import KBTier, DataSecurityLevel
 
-UPLOAD_DIR = os.path.join(os.getcwd(), "data", "uploads")
+from app.core.config import settings
+
+UPLOAD_DIR = settings.UPLOAD_DIR
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 class KBService:
@@ -54,6 +56,16 @@ class KBService:
         security_level: DataSecurityLevel = DataSecurityLevel.GENERAL,
         parent_id: Optional[int] = None
     ) -> KnowledgeBaseHierarchy:
+        # 【对齐修复】前置鉴权：若存在父目录，校验当前用户对父目录的写权限
+        if parent_id:
+            stmt = select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.kb_id == parent_id)
+            res = await db.execute(stmt)
+            parent = res.scalars().first()
+            if not parent:
+                raise ValueError("Parent directory not found")
+            if parent.owner_id != user_id and parent.dept_id != dept_id:
+                raise ValueError("Permission denied on parent directory")
+
         node = KnowledgeBaseHierarchy(
             kb_name=filename,
             kb_type="FILE",

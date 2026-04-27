@@ -44,15 +44,39 @@ class ApplyPolishRequest(BaseModel):
 @router.get("/", response_model=List[DocumentResponse])
 async def list_documents(
     status: Optional[DocumentStatus] = None,
+    dept_id: Optional[int] = None,
     page: int = 1,
     page_size: int = 20,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
     docs = await DocumentService.list_documents(
-        db, current_user.user_id, current_user.dept_id, current_user.role_level, status, page, page_size
+        db, current_user.user_id, current_user.dept_id, current_user.role_level, status, page, page_size, dept_id
     )
     return docs
+
+@router.get("/{doc_id}/download")
+async def download_document(
+    doc_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    doc = await DocumentService.get_document(db, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    # 权限校验：同详情页逻辑
+    if doc.dept_id != current_user.dept_id and current_user.role_level < 99 and doc.creator_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not doc.word_output_path or not os.path.exists(doc.word_output_path):
+        raise HTTPException(status_code=404, detail="排版产物尚未生成或已过期")
+        
+    return FileResponse(
+        path=doc.word_output_path,
+        filename=os.path.basename(doc.word_output_path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 @router.delete("/{doc_id}")
 async def delete_document(
@@ -69,14 +93,9 @@ async def delete_document(
     if doc.creator_id != current_user.user_id and current_user.role_level < 5:
         raise HTTPException(status_code=403, detail="Permission denied")
         
-    doc.is_deleted = True
-    
-    # 【级联修复】删除公文时释放关联锁
-    redis_client = await get_redis()
-    lock_key = f"lock:{doc_id}"
-    await redis_client.delete(lock_key)
-    
-    await db.commit()
+    success = await DocumentService.delete_document(db, doc_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Document not found")
     
     # 【对齐修复】添加审计日志
     background_tasks.add_task(
@@ -261,8 +280,8 @@ async def trigger_format(
     await db.commit()
 
     # 派发 Celery 任务
-    from app.tasks.worker import dummy_format_task
-    dummy_format_task.apply_async(args=[doc_id], task_id=task_id)
+    from app.tasks.worker import format_document_task
+    format_document_task.apply_async(args=[doc_id], task_id=task_id)
 
     return {"task_id": task_id}
 

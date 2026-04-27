@@ -1,10 +1,11 @@
 from fastapi import APIRouter
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.redis import redis_client
 from app.core.celery_app import celery_app
 from sqlalchemy import text
 from app.core.redis import get_redis
+from pydantic import BaseModel
+from typing import Optional
 import httpx
 import structlog
 
@@ -57,3 +58,23 @@ async def get_system_status():
         "ai_engine_online": ai_ok
     }
 
+@router.post("/cleanup-cache")
+async def cleanup_system_cache():
+    # 1. 触发 Celery 清理任务
+    celery_app.send_task("app.tasks.worker.cleanup_expired_files_task")
+    return {"status": "success", "message": "Cache cleanup task triggered"}
+
+class DynamicConfigRequest(BaseModel):
+    lock_ttl: Optional[int] = None
+    sse_retries: Optional[int] = None
+
+@router.put("/config")
+async def update_dynamic_config(payload: DynamicConfigRequest):
+    # 将动态配置持久化至 Redis
+    current_redis = await get_redis()
+    if payload.lock_ttl:
+        await current_redis.set("config:lock_ttl", str(payload.lock_ttl))
+    if payload.sse_retries:
+        await current_redis.set("config:sse_retries", str(payload.sse_retries))
+        
+    return {"status": "success", "config": payload.model_dump(exclude_unset=True)}

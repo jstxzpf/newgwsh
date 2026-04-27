@@ -173,9 +173,16 @@ class DocumentService:
         is_approved: bool, 
         rejection_reason: str = None
     ):
+        # 【对齐修复】前置校验：若公文已归档或已结项，禁止重复审批 (幂等性与唯一性防护)
         doc = await DocumentService.get_document(db, doc_id)
-        if not doc or doc.status != DocumentStatus.SUBMITTED:
-            raise DocumentStateError("Document not found or not in SUBMITTED state")
+        if not doc:
+             raise DocumentStateError("Document not found")
+             
+        if doc.status == DocumentStatus.APPROVED:
+             raise DocumentStateError("该公文已审批通过，禁止重复操作")
+
+        if doc.status != DocumentStatus.SUBMITTED:
+            raise DocumentStateError("Document not in SUBMITTED state")
             
         now = datetime.now().replace(microsecond=0) # 【对齐修复】确保存储与指纹计算精度一致
         
@@ -213,14 +220,16 @@ class DocumentService:
         role_level: int,
         status: Optional[DocumentStatus] = None,
         page: int = 1,
-        page_size: int = 20
+        page_size: int = 20,
+        filter_dept_id: Optional[int] = None
     ):
         from sqlalchemy import or_
         stmt = select(Document).where(Document.is_deleted == False)
         
         # 三层权限隔离
         if role_level >= 99: # 超级管理员
-            pass
+            if filter_dept_id:
+                stmt = stmt.where(Document.dept_id == filter_dept_id)
         elif role_level >= 5: # 科长，可看本科室所有
             stmt = stmt.where(Document.dept_id == dept_id)
         else: # 普通科员
@@ -304,3 +313,19 @@ class DocumentService:
             "lock_token": token,
             "lock_expires_at": (datetime.now().timestamp() + settings.LOCK_TTL_SECONDS)
         }
+
+    @staticmethod
+    async def delete_document(db: AsyncSession, doc_id: str):
+        doc = await DocumentService.get_document(db, doc_id)
+        if not doc:
+            return False
+            
+        doc.is_deleted = True
+        
+        # 【级联修复】删除公文时释放关联锁 (移至 Service 层保证原子性)
+        redis_client = await get_redis()
+        lock_key = f"lock:{doc_id}"
+        await redis_client.delete(lock_key)
+        
+        await db.commit()
+        return True

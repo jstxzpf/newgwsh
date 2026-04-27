@@ -30,7 +30,7 @@ export const Dashboard: React.FC = () => {
       setRejectedDocs(resRejected.data);
 
       // 3. 若是科长，获取待签批
-      if (userInfo?.roleLevel >= 5) {
+      if ((userInfo?.roleLevel ?? 0) >= 5) {
           const resApprovals = await apiClient.get('/documents/', { params: { status: 'SUBMITTED' } });
           setApprovals(resApprovals.data);
       }
@@ -129,7 +129,7 @@ export const Dashboard: React.FC = () => {
             />
           </Card>
           
-          {userInfo?.roleLevel >= 5 && (
+          {(userInfo?.roleLevel ?? 0) >= 5 && (
             <Card title="待我签批 (Approvals)" style={{ borderTop: '4px solid #52c41a' }}>
               <List
                 dataSource={approvals} 

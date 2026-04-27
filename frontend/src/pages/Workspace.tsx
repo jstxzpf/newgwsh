@@ -116,6 +116,24 @@ export const Workspace: React.FC = () => {
     }
   };
 
+  const handleFormatAndDownload = async () => {
+    if (!currentDocId) return;
+    try {
+      // 1. 触发排版任务
+      const res = await apiClient.post(`/documents/${currentDocId}/format`);
+      message.info('排版任务已派发，正在生成国标文档...');
+      
+      // 2. 使用 watchTask 监听
+      watchTask(res.data.task_id, () => {
+        const downloadUrl = `${appConfig.apiBaseUrl}/documents/${currentDocId}/download`;
+        window.open(downloadUrl, '_blank');
+        message.success('文档已生成，正在启动下载');
+      });
+    } catch (e) {
+      message.error('触发排版失败');
+    }
+  };
+
   const handleSubmitApproval = async () => {
       try {
           await apiClient.post(`/documents/${currentDocId}/submit`);
@@ -156,7 +174,7 @@ export const Workspace: React.FC = () => {
 
             <Button 
                 style={{ backgroundColor: '#08979c', color: '#fff', border: 'none' }} 
-                onClick={() => message.info('GB排版任务已压入队列，请稍后在下载中心查看。')}
+                onClick={handleFormatAndDownload}
                 disabled={isReadOnly || content.length === 0}
             >
                 GB国标排版并下载

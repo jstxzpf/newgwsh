@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_async_db
@@ -10,6 +10,7 @@ from app.models.user import User
 from pydantic import BaseModel
 from typing import Optional, List
 import json
+import os
 from app.core.redis import get_redis
 
 router = APIRouter()
@@ -84,8 +85,6 @@ async def retry_failed_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
-    from sqlalchemy import select
-    import os
     res = await db.execute(select(AsyncTask).where(AsyncTask.task_id == task_id))
     task = res.scalars().first()
     
@@ -127,5 +126,36 @@ async def retry_failed_task(
         dummy_polish_task.apply_async(args=[task.doc_id], task_id=task_id)
     elif task.task_type == TaskType.PARSE:
         parse_kb_file_task.apply_async(args=[task.kb_id, task.input_params.get("file_path")], task_id=task_id)
+    elif task.task_type == TaskType.FORMAT:
+        from app.tasks.worker import format_document_task
+        format_document_task.apply_async(args=[task.doc_id], task_id=task_id)
     
     return {"status": "success", "message": "Task queued for retry"}
+
+class PolishTaskRequest(BaseModel):
+    doc_id: str
+    context_kb_ids: List[int] = []
+    lock_token: str
+
+@router.post("/polish")
+async def trigger_polish_task(
+    payload: PolishTaskRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    from app.api.v1.endpoints.documents import trigger_polish
+    # 借用 documents 模块的逻辑实现，保持一致性
+    return await trigger_polish(payload.doc_id, payload, payload.lock_token, current_user, db)
+
+class FormatTaskRequest(BaseModel):
+    doc_id: str
+
+@router.post("/format")
+async def trigger_format_task(
+    payload: FormatTaskRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    from app.api.v1.endpoints.documents import trigger_format
+    return await trigger_format(payload.doc_id, background_tasks, current_user, db)

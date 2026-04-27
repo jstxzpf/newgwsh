@@ -9,8 +9,7 @@ interface WatermarkProps {
 export const AntiLeakWatermark: React.FC<WatermarkProps> = ({ username, department }) => {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
-  const timeStr = now.toTimeString().slice(0, 5); // 获取 HH:mm
-  const watermarkText = `${department} - ${username} - ${dateStr} ${timeStr}`;
+  const watermarkText = `${department} - ${username} - ${dateStr}`;
 
   return (
     <div 
