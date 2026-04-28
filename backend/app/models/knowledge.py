@@ -44,7 +44,7 @@ class KnowledgeChunk(Base):
     physical_file_id = Column(Integer, ForeignKey("knowledge_physical_files.file_id"), index=True, nullable=False)
     chunk_index = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(768), nullable=True) # pgvector
+    embedding = Column(Vector(1024), nullable=True) # pgvector
     is_deleted = Column(Boolean, index=True, nullable=False, default=False)
     kb_tier = Column(Enum(KBTier), nullable=False)
     security_level = Column(Enum(DataSecurityLevel), nullable=False)

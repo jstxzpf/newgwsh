@@ -19,7 +19,21 @@ export const KnowledgeBase: React.FC = () => {
     setLoading(true);
     try {
       const res = await apiClient.get('/kb/hierarchy');
-      setData(res.data.data);
+      // 后端直接返回的是 roots 数组，而非 { data: [...] }
+      const rawData = Array.isArray(res.data) ? res.data : [];
+      
+      // 深度巡检发现：Table 是按扁平列表展示的，需要将树形结构递归平铺
+      const flattenData: any[] = [];
+      const flatten = (nodes: any[]) => {
+        nodes.forEach(node => {
+          flattenData.push(node);
+          if (node.children && node.children.length > 0) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(rawData);
+      setData(flattenData);
     } catch (e) {
       message.error("获取知识库失败");
     } finally {
@@ -59,7 +73,6 @@ export const KnowledgeBase: React.FC = () => {
         message.success(`${file.name} 解析完成`);
         fetchHierarchy();
       });
-      fetchHierarchy();
     } catch (err) {
       onError(err);
       message.error(`${file.name} 上传失败`);
@@ -71,7 +84,23 @@ export const KnowledgeBase: React.FC = () => {
       title: '资产名称',
       dataIndex: 'kb_name',
       key: 'kb_name',
-      render: (text: string) => <div style={{ display: 'flex', alignItems: 'center' }}><FileTextOutlined style={{ marginRight: 8, color: '#1677ff' }}/> <span style={{ fontWeight: 500 }}>{text}</span></div>
+      render: (text: string, record: any) => (
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {record.kb_type === 'DIRECTORY' ? 
+            <FileTextOutlined style={{ marginRight: 8, color: '#faad14' }}/> : 
+            <FileTextOutlined style={{ marginRight: 8, color: '#1677ff' }}/>
+          } 
+          <span style={{ fontWeight: 500 }}>{text}</span>
+        </div>
+      )
+    },
+    {
+      title: '类型',
+      dataIndex: 'kb_type',
+      key: 'kb_type',
+      render: (type: string) => (
+        <Tag color={type === 'DIRECTORY' ? 'orange' : 'blue'}>{type === 'DIRECTORY' ? '目录' : '文件'}</Tag>
+      )
     },
     {
       title: '层级',
@@ -93,7 +122,8 @@ export const KnowledgeBase: React.FC = () => {
       title: '解析状态',
       dataIndex: 'parse_status',
       key: 'parse_status',
-      render: (status: string) => {
+      render: (status: string, record: any) => {
+        if (record.kb_type === 'DIRECTORY') return '-';
         let color = 'default';
         if (status === 'READY') color = 'success';
         if (status === 'PARSING') color = 'processing';
@@ -112,9 +142,9 @@ export const KnowledgeBase: React.FC = () => {
     }
   ];
 
-  const personalData = data.filter(d => d.kb_tier === 'PERSONAL');
-  const deptData = data.filter(d => d.kb_tier === 'DEPT');
-  const baseData = data.filter(d => d.kb_tier === 'BASE');
+  const personalData = (data || []).filter(d => d.kb_tier === 'PERSONAL');
+  const deptData = (data || []).filter(d => d.kb_tier === 'DEPT');
+  const baseData = (data || []).filter(d => d.kb_tier === 'BASE');
 
   const renderTabContent = (tier: string, tierData: any[], canUpload: boolean) => (
     <div style={{ background: '#fff', padding: '24px', borderRadius: '4px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>

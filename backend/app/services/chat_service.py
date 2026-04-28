@@ -13,7 +13,7 @@ class ChatService:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
                     f"{settings.OLLAMA_BASE_URL}/api/embeddings",
-                    json={"model": settings.OLLAMA_MODEL, "prompt": text_input},
+                    json={"model": settings.OLLAMA_EMBEDDING_MODEL, "prompt": text_input},
                     timeout=30
                 )
                 resp.raise_for_status()
@@ -78,7 +78,7 @@ class ChatService:
         params = {"kb_ids": context_kb_ids, "user_id": user_id, "dept_id": dept_id, "query": query,
                   "vector_top_k": settings.RAG_VECTOR_TOP_K, "bm25_top_k": settings.RAG_BM25_TOP_K,
                   "rrf_k": settings.RAG_RRF_K, "top_k_final": settings.RAG_TOP_K_FINAL,
-                  "query_embedding": f"[{','.join(['0.0']*768)}]" }
+                  "query_embedding": f"[{','.join(['0.0']*1024)}]" }
         params.update(vector_params)
         result = await db.execute(text(sql), params)
         return result.mappings().all()

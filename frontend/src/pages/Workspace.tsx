@@ -13,6 +13,7 @@ import { useTaskWatcher } from '../hooks/useTaskWatcher';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 import { countPureText } from '../utils/wordCount';
+import { appConfig } from '../config';
 
 export const Workspace: React.FC = () => {
   const { currentDocId, content, aiPolishedContent, setContent, setDocId, viewMode, setViewMode, setPolishedContent, context_kb_ids } = useEditorStore();
@@ -125,7 +126,7 @@ export const Workspace: React.FC = () => {
       
       // 2. 使用 watchTask 监听
       watchTask(res.data.task_id, () => {
-        const downloadUrl = `${appConfig.apiBaseUrl}/documents/${currentDocId}/download`;
+        const downloadUrl = `${appConfig.apiBaseURL}/documents/${currentDocId}/download`;
         window.open(downloadUrl, '_blank');
         message.success('文档已生成，正在启动下载');
       });

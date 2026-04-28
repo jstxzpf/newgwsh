@@ -137,6 +137,27 @@ async def replace_knowledge_version(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/directory")
+async def create_kb_directory(
+    name: str,
+    parent_id: Optional[int] = None,
+    kb_tier: KBTier = KBTier.PERSONAL,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    # 鉴权
+    if kb_tier == KBTier.BASE and current_user.role_level < 99:
+        raise HTTPException(status_code=403, detail="Only admin can create BASE directory")
+    
+    try:
+        node = await KBService.get_or_create_directory(
+            db, name, parent_id, current_user.user_id, current_user.dept_id, kb_tier
+        )
+        return {"status": "success", "kb_id": node.kb_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/tree", response_model=List[KBNodeOut])
 @router.get("/hierarchy", response_model=List[KBNodeOut])
 async def get_hierarchy(
     current_user: User = Depends(get_current_user),

@@ -13,6 +13,8 @@ logger = structlog.get_logger()
 
 router = APIRouter()
 
+import psutil
+
 @router.get("/status")
 async def get_system_status():
     # 1. DB 探活
@@ -51,11 +53,17 @@ async def get_system_status():
         logger.error("system_probe_failed", component="ollama", error=str(e))
         ai_ok = False
 
+    # 5. 资源统计
+    cpu_pct = psutil.cpu_percent()
+    mem = psutil.virtual_memory()
+
     return {
         "db_connected": db_ok,
         "redis_connected": redis_ok,
         "celery_workers_active": workers,
-        "ai_engine_online": ai_ok
+        "ai_engine_online": ai_ok,
+        "cpu_pct": cpu_pct,
+        "memory_pct": mem.percent
     }
 
 @router.post("/cleanup-cache")

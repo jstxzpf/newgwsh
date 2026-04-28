@@ -67,7 +67,7 @@ export const useAutoSave = (docId: string | null, lockState: LockState, lockToke
         performSave();
         // 这是一个同步阻塞请求的近似实现，或者通过 Beacon API 发送
         if (docId && lockToken) {
-            const url = `${appConfig.apiBaseUrl}/locks/release?doc_id=${docId}&token=${lockToken}`;
+            const url = `${appConfig.apiBaseURL}/locks/release?doc_id=${docId}&token=${lockToken}`;
             navigator.sendBeacon(url);
         }
     };
@@ -77,6 +77,6 @@ export const useAutoSave = (docId: string | null, lockState: LockState, lockToke
         clearInterval(timer);
         window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [docId, lockState, lockToken, content, draftContent]);
+  }, [docId, lockState, lockToken, content, aiPolishedContent]);
 };
 

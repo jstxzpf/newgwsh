@@ -213,17 +213,26 @@ def parse_kb_file_task(self, kb_id: int, file_path: str):
                     chunks_to_save.append((f"Row {row_idx+2}", row_text, meta))
 
         import httpx
+        import structlog
+        task_logger = structlog.get_logger()
+
         for i, (anchor, content, meta) in enumerate(chunks_to_save):
             embedding = None
             try:
                 with httpx.Client(timeout=30.0) as client:
                     resp = client.post(
                         f"{settings.OLLAMA_BASE_URL}/api/embeddings",
-                        json={"model": settings.OLLAMA_MODEL, "prompt": content}
+                        json={"model": settings.OLLAMA_EMBEDDING_MODEL, "prompt": content}
                     )
                     if resp.status_code == 200:
                         embedding = resp.json().get("embedding")
-            except Exception: pass
+                    else:
+                        task_logger.error("ollama_embedding_failed", 
+                                        status_code=resp.status_code, 
+                                        response=resp.text,
+                                        model=settings.OLLAMA_EMBEDDING_MODEL)
+            except Exception as e:
+                task_logger.error("ollama_connection_error", error=str(e))
 
             full_meta = {"anchor": anchor, "task_id": task_id}
             full_meta.update(meta)

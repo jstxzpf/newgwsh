@@ -8,7 +8,12 @@ import {
   CheckCircleOutlined, 
   SettingOutlined,
   BellOutlined,
-  UserOutlined
+  UserOutlined,
+  MessageOutlined,
+  CloudServerOutlined,
+  LogoutOutlined,
+  SwapOutlined,
+  DownOutlined
 } from '@ant-design/icons';
 import { taixingTheme } from './theme/themeConfig';
 import { AntiLeakWatermark } from './components/Security/AntiLeakWatermark';
@@ -18,6 +23,8 @@ import { Dashboard } from './pages/Dashboard';
 import { Approvals } from './pages/Approvals';
 import { Settings } from './pages/Settings';
 import { Documents } from './pages/Documents';
+import { Chat } from './pages/Chat';
+import { TaskManagement } from './pages/TaskManagement';
 import { useAuthStore } from './store/useAuthStore';
 import { GlobalTaskWatcher } from './components/GlobalTaskWatcher';
 import apiClient from './api/client';
@@ -27,12 +34,15 @@ import { Login } from './pages/Login';
 import { ProtectedRoute } from './components/Auth/ProtectedRoute';
 
 import { appConfig } from './config';
+import { Dropdown, MenuProps } from 'antd';
 
 const { Header, Sider, Content, Footer } = Layout;
 
 const GlobalLayout = () => {
   const userInfo = useAuthStore(state => state.userInfo);
+  const logout = useAuthStore(state => state.logout);
   const location = useLocation();
+  const navigate = useNavigate();
   const [sysStatus, setSysStatus] = useState<boolean>(true);
   
   const isWorkspace = location.pathname.startsWith('/workspace');
@@ -47,10 +57,35 @@ const GlobalLayout = () => {
       }
     };
     probe();
-    // 使用配置定义的探针间隔
     const t = setInterval(probe, appConfig.sysProbeInterval);
     return () => clearInterval(t);
   }, []);
+
+  const userMenuItems: MenuProps['items'] = [
+    {
+      key: 'switch',
+      label: '切换账号',
+      icon: <SwapOutlined />,
+      onClick: () => {
+        logout();
+        navigate('/login');
+      }
+    },
+    {
+      type: 'divider',
+    },
+    {
+      key: 'logout',
+      label: '退出登录',
+      danger: true,
+      icon: <LogoutOutlined />,
+      onClick: () => {
+        logout();
+        message.success('已安全退出系统');
+        navigate('/login');
+      }
+    },
+  ];
 
   return (
     <Layout style={{ minHeight: '100vh' }} aria-label="全站主布局容器">
@@ -74,6 +109,12 @@ const GlobalLayout = () => {
           <Menu.Item key="knowledge" icon={<DatabaseOutlined />}>
             <Link to="/knowledge">统计知识资产库</Link>
           </Menu.Item>
+          <Menu.Item key="chat" icon={<MessageOutlined />}>
+            <Link to="/chat">HRAG 智能问答</Link>
+          </Menu.Item>
+          <Menu.Item key="tasks" icon={<CloudServerOutlined />}>
+            <Link to="/tasks">异步任务管理</Link>
+          </Menu.Item>
           <Menu.Item key="approvals" icon={<CheckCircleOutlined />}>
             <Link to="/approvals">签批管控台</Link>
           </Menu.Item>
@@ -93,10 +134,14 @@ const GlobalLayout = () => {
             <Badge count={2} size="small" offset={[2, 0]}>
               <BellOutlined style={{ fontSize: '18px', color: '#555', cursor: 'pointer' }} />
             </Badge>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '12px' }}>
-              <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
-              <span style={{ fontSize: '14px', color: '#333' }}>{userInfo?.username} ({userInfo?.deptName || '业务科室'})</span>
-            </div>
+            
+            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" arrow>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '12px', cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', transition: 'all 0.3s' }} className="user-dropdown-trigger">
+                <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
+                <span style={{ fontSize: '14px', color: '#333', fontWeight: 500 }}>{userInfo?.username}</span>
+                <DownOutlined style={{ fontSize: '10px', color: '#888' }} />
+              </div>
+            </Dropdown>
           </div>
         </Header>
         
@@ -107,6 +152,8 @@ const GlobalLayout = () => {
             <Route path="/workspace/:doc_id" element={<Workspace />} />
             <Route path="/documents" element={<Documents />} />
             <Route path="/knowledge" element={<KnowledgeBase />} />
+            <Route path="/chat" element={<Chat />} />
+            <Route path="/tasks" element={<TaskManagement />} />
             <Route path="/approvals" element={<Approvals />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # AI 引擎配置 (颗粒度对齐)
     OLLAMA_BASE_URL: str = "http://10.132.60.133:11434"
     OLLAMA_MODEL: str = "gemma4:e4b"
+    OLLAMA_EMBEDDING_MODEL: str = "bge-m3"
     AI_RATE_LIMIT_REQUESTS: int = 5
     AI_RATE_LIMIT_WINDOW_SECONDS: int = 60
 
