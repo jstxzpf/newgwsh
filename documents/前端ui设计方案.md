@@ -52,8 +52,9 @@
 页面分列为左右双栏瀑布流或顶部数据卡片 + 下方双栏。
 * **顶部快捷栏**：放置醒目的高亮发散按钮【➕ 起草新公文】（点击即触发 `/init` 并携带新 `doc_id` 路由跳转工作区）。
 * **任务聚焦板 (Focus Board)**：
-    * 若拥有审批权限：展示【待我签批】列表（标题、起草人、提交时间），提供快捷跳转 `/approvals` 按钮。
-    * 个人事务：展示【被驳回的公文】列表（红色标识驳回理由，附带一键唤醒 `revise` 回退编辑的按钮）。
+    * 若拥有审批权限：展示【待我签批】列表。
+    * 个人事务：展示【我的公文任务】（包含正在进行的润色/排版进度）及【被驳回的公文】列表（红色标识驳回理由，附带一键唤醒 `revise` 回退编辑的按钮）。
+* **异步任务中心 (GlobalTaskCenter)**：展示全局所有异步任务（POLISH/FORMAT/PARSE）的实时进度条、状态及错误堆栈。支持对 `FAILED` 任务发起重试。
 * **近期处理台**：最近修改的 `DRAFTING` 状态的公文轮播列表页，方便接续草拟。
 
 ### 3. 沉浸式公文工作区 (Workspace View - 核心心脏)
@@ -89,6 +90,39 @@
 * **安全审计与容灾观测台**：依赖 `trace_id` 或者公文指纹溯源调阅只读状态的 `nbs_workflow_audit` 日志流。并向异常 `retry_count`（>3次）爆发死信的 `async_tasks` 提供【查栈及手动肃清】操作柄。
 * **强控制悲观锁大盘**：列表监控活跃挂钩 Redis 的占用凭证。具备处理天灾断线的超管特权：执行红色醒目的【强制斩断锁联结并驱逐】功能。
 * **全局基建动态嗅探**：提供修订 `lock_ttl_seconds` 及 Ollama Http 超时限长阈等参数的控制表单，配置触发清理死缓文件的强力唤醒按键。
+
+### 2. 高精度锁控策略 (Lock Guard)
+* **Web Worker 心跳**：`useLockGuard` 必须启动一个 Web Worker 运行 `setInterval`。确保心跳请求不被浏览器节流（Throttling）干扰。
+* **续期校准**：心跳成功后，依据后端返回的 `next_suggested_heartbeat` 校准下次执行时间，并将 `lock_ttl_remaining` 同步至 UI 状态栏。
+
+### 3. 自动保存安全网 (Auto-Save Guard)
+* **失败预警**：当 `saveFailureCount >= 3` 时，通过 `notification.error` 强制阻断用户操作并提示“检测到网络异常或锁已失效，自动保存连续多次失败。请检查连接或手动复制内容防止丢失”。
+* **生命周期闭环**：`beforeunload` 时使用 `navigator.sendBeacon` 发送最后一次心跳与释放。
+    *   **权限响应**：非科室负责人或管理员，`DEPT`/`BASE` 的写入操作（上传/新建目录）应自动隐藏或禁用。
+* **多级目录树 (Knowledge Tree)**：
+    *   左侧展示虚拟文件树，支持无限级 `DIRECTORY` 嵌套。
+    *   **交互逻辑**：支持点击展开、右键菜单（上传到此处、新建文件夹、重命名、替换上传、删除）。
+* **上传面板 (Upload Console)**：
+
+### 8. 知识资产库视图 (Knowledge Base Explorer)
+
+知识库采用“网盘化”设计，兼顾层次感与操作便捷性。
+
+*   **分仓导航 (Tiered Tabs)**：
+    *   顶部提供 `PERSONAL`、`DEPT`、`BASE` 三个分仓 Tab 切换。
+    *   **权限响应**：非科室负责人或管理员，`DEPT`/`BASE` 的写入操作（上传/新建目录）应自动隐藏或禁用。
+*   **多级目录树 (Knowledge Tree)**：
+    *   左侧展示虚拟文件树，支持无限级 `DIRECTORY` 嵌套。
+    *   **交互逻辑**：支持点击展开、右键菜单（上传到此处、新建文件夹、重命名、替换上传、删除）。
+*   **上传面板 (Upload Console)**：
+    *   **多模态输入**：支持文件多选、文件夹拖拽及 `.zip/.tar.gz` 压缩包上传。
+    *   **安全标签注入**：上传过程中弹出浮层，强制用户为本次上传的资产选择安全等级（一般、重要、核心）。支持“一键应用到全部”。
+*   **资产状态可视化**：
+    *   `PARSING` (⏳)：节点图标显示循环加载动画，并伴随“AI 正在进行语义切片...”的 Tooltip。
+    *   `READY` (✅)：正常文件图标。
+    *   `FAILED` (❌)：红色警示图标，点击可查看后端返回的具体解析错误，并提供【重试】按钮。
+*   **版本管理交互**：
+    *   对选中文件点击“替换上传”，若后端返回“内容未变化”，前端以 `message.warning` 拦截并中断流程。
 
 ---
 
@@ -131,13 +165,18 @@
 ### 2. 全局无头守望者 (`GlobalTaskWatcher.tsx`)
 * **隐身组件**：挂载在 `<App />` 的最顶层结构中，不占据任何 DOM 视觉空间。
 * **职责与通信**：全局监听 `useTaskStore` 中的活跃任务，此囊括文档队列甚至 `PARSE` 切片行为。先发起请求体附带 `{"task_id": "uuid"}` 去 `/api/v1/sse/ticket` 开具 Ticket 随后叩动 EventSource 源头建立通道防泄密截获。**建立严苛的多路并行业务轨**：以 `task_id` 为映射 Key 维护多实例 EventSource 句柄表；管控最大并发 SSE 连接池（如上限必须设定为 `≤5`），若跨过峰值强制挂起并警告排队；一旦任意单体任务接收到 `COMPLETED`、`FAILED` 断语后，立刻注销关闭特定的 EventSource 流道封堵内存外泄并卸载轮询。
-* **闭环接管通知**：一旦推送 `COMPLETED` 及 `FAILED`，右下角触发跨页面 Notification 提醒：排版即刻提供 Blob 方式组装的下载载荷入口；润色下达回跳 `DIFF` 对峙局面的强绑定跳转钮并伴随后台数据补齐拉起；若是重压失败便弹出容灾级别的重新递交申请按键引流 `POST /tasks/{id}/retry`。
+* **闭环接管通知**：一旦接收到 `COMPLETED`，右下角弹出 Notification 通知卡片。
+    * **润色任务**：文案为“公文《xxx》的AI润色已完成。点击查看详情”。提供“查看详情”按钮（跳转至工作区并开启 DIFF）及“忽略”按钮。
+    * **排版任务**：文案为“公文《xxx》国标排版已完成，点击下载”。提供“立即下载”按钮。
+    * **失败任务**：文案为“任务《xxx》执行失败，请前往任务中心查看”。提供“前往处理”按钮。
 * **断线补偿**：连接若是发生 `onerror` 被驱离时，必须在退避静默期间辅以发向底层 `task/status` 轮调询问同步可能流落未触发到前端队列中的迟点包裹。
 
-### 3. 驳回通知交互
-* 当起草人收到公文被驳回通知时：
-  * 弹出 `notification.warning` 显示驳回理由。
-  * 附带 `[前往修改]` 按钮，点击调用 `POST /documents/{doc_id}/revise` 接口将公文回退至 `DRAFTING` 状态。后端会自动颁发并返回有效的锁 Ticket。前端只需这一次请求即可带锁进入工作区，消灭了重新发起锁定请求过程中的争用缝隙。
+### 3. 驳回与锁回收通知交互
+* **驳回通知**：起草人收到 SSE 消息时，弹出 `notification.warning` 显示驳回理由，附带 `[前往修改]` 按钮触发 `revise`。
+* **锁被动回收 (Reclaim Notification)**：当后端因他人抢占（如驳回重起草）或管理员强制释放锁时，通过 SSE 推送 `LOCK_RECLAIMED` 事件。前端监听到该事件后，必须立刻执行以下动作：
+  1. 弹出 `modal.error` 提示“您的编辑权限已被回收（原因：xxx），当前已进入只读模式”。
+  2. 将 `Editor` 组件设为 `readOnly: true`。
+  3. 禁用所有保存与提交按钮。
 
 ---
 
@@ -150,8 +189,10 @@
 * `content: string` (当前编辑器正文：在 DIFF 模式下，本段必须唯一指代左栏只读原稿，**严禁使用右栏内容污染 `content`**)
 * `aiPolishedContent: string | null` (AI 润色建议稿，用于 DIFF 模式)
 * `viewMode: 'SINGLE' | 'DIFF'` (双模态状态)
-* `context_kb_ids: number[]` (当前勾选的知识库目录树节点 ID 数组，用于 RAG 挂载上下文)
-* `lastSavedHash: string` (hash 判重。规则：对 `content` 字段原文进行 SHA-256 计算，不含标题与不可见字符。接收到后端 `changed: false` 时不更新此 hash，避免无效写入)
+* `context_kb_ids: number[]` (当前勾选的知识库目录树节点 ID 数组)
+* `context_snapshot_version: number` (勾选时从后端获取的时间戳，用于防御目录树竞态)
+* `saveFailureCount: number` (保存失败计数器)
+* `lock_ttl_remaining: number` (锁剩余秒数，由后端自动保存/心跳响应更新)
 * **DIFF 模式草稿双轨保护**：进入 DIFF 模式时，先检查服务端 `draft_suggestion` 恢复，若空再检查 LocalStorage 缓存。在此模式下，定时器停止云端 `content` 同步。必须将右栏建议稿加密存入 `localStorage`（仅作崩溃极速恢复），同时调用专门针对此场景的 `POST /documents/{doc_id}/auto-save` 并将 payload 设计为 `{"draft_content": "修改后的建议稿"}`，将数据持久化推送到云端的 `draft_suggestion` 字段（主存储，用于跨终端恢复）。**请注意此处的架构权衡限制：由于 `draft_suggestion` 是单值字段，DIFF 模式下的每次自动保存只会覆盖最新的一份草稿，无法像 `content` 那样实现多版本的快照追溯**。在 `useEditorStore` 中，`persist` 机制利用 `partialize` 筛选，严格保证只会存储最近 2 次的本地快照序列以作短效极速恢复（其生命周期限制在本地提交审批或明确丢弃/接受合并时销毁，不可依赖此项作为灾变级历史源）。
 * **云端后悔药机制 (Cloud Snapshot History)**：完全摒弃单机历史。在执行“接受润色”等操作前，**后端会自动创建备份快照**，前端仅需配合展示。列表拉取支持 `(page=1, page_size=20)` 分页。
 
@@ -172,9 +213,14 @@
 * 选择覆盖恢复前由 `<Popconfirm>` 中拦二次核查阻拦危险手误。当确定覆写旧案时，同时调用 `POST /api/v1/documents/{doc_id}/snapshots` 再发起一次当前最新画板上存在的“快照备灾保存动作”，严丝合缝拦截全量误删意外。
 
 ### 2. 隔离冲突死锁警戒仪 (`LockConflictBanner.tsx`)
-* **冲突降级交互**：当前端从 `POST /locks/acquire` 收到 `409 Conflict` 时，将编辑器设为 `READONLY_CONFLICT` 模式，在编辑器顶部显示**醒目的黄色横幅** (Alert Banner) 警示已被别人抢先占取修改通道锁位。如果是文件状态非草稿引起的，则进入 `READONLY_IMMUTABLE` 模式。锁获取失败或未持有锁即只读，绝不能混淆这两类状态的展示。
-* **自动恢复与退避重试网络**：处于只读模式的浏览器会静默向 `/locks/acquire` 发起重试。为了防御针对 Redis 的连接雪崩风暴，此处的重试必须严格引入指数退避（Exponential Backoff）算法，采用 `2s, 4s, 8s...` 阶梯级距且设置封顶最长检测限制（如设上限 30s）。前端在发起 `acquire` 成功后会收到 `lock_token`（必须将其存入 `sessionStorage` 以便在刷新页面时抢救性恢复锁持有人身份验证），并在后续的 `release` 和 `heartbeat` 中必须在请求体携带该令牌用于鉴权。同时，锁心跳的轮询频率与时延存活长限定必须基于初始化时请求 `GET /api/v1/locks/config` 下发的设定值为基准装载，绝不允许硬编码（注意：该配置前端只在单页应用初始化时拉取一次，运行时不接受热更新，直到用户下一次刷新页面）。通过在 `useEditorStore` 或专属的 `useLockGuard` Hook 中严密封挂 `visibilitychange` 事件流对 `document.visibilityState` 的监听回调，当页面从休眠/不可见状态转为可见时，应立刻调用 `/locks/heartbeat`（携带令牌）执行锁状态嗅探校验；若心跳返回 409，则需立即将编辑器强制降级为只读警戒态，并显式弹窗昭示操作者出现锁遗失状况。
-* **卸载生死门兜底发送技术**：拦截浏览器强退事件 `window.beforeunload` 时，**必须且统一使用 `fetch` 搭配 `keepalive: true` 属性**来发射最后的自动保存与锁释放请求，因为 `sendBeacon` 无法携带自定义的 `Authorization` Bearer Token Header，会导致请求被 401 拦截。基于全局配置的环境变量 baseUrl 拼接完整的 `/api/v1/documents/{doc_id}/auto-save` 及 `/api/v1/locks/release` API全路径，强制同步送抵最后一个毫秒残余缓存并彻底销锁解除操作，严防缺少 base path 而造成的抛弃。
+* **锁获取与维持策略**：
+  * **延时预占**：新建公文跳转至 `/workspace/:doc_id` 后，不立即申请锁。仅当用户第一次产生输入行为、粘贴内容或焦点进入编辑器时，由 `useLockGuard` 触发 `POST /api/v1/locks/acquire`。
+  * **心跳与续期**：基于 `GET /api/v1/locks/config` 下发的频率（默认 90s）发送 `POST /locks/heartbeat`。
+  * **只读降级**：
+    1. **`READONLY_CONFLICT`**：获取锁 409 冲突。黄色横幅提示“XX 正在编辑，当前只读”。
+    2. **`READONLY_IMMUTABLE`**：公文状态非 `DRAFTING`。蓝色/灰色横幅提示“公文流转中，不可编辑”。
+  * **自动恢复**：只读模式下引入指数退避（2s, 4s, 8s... 至 30s）自动重试 `acquire`。
+* **卸载生死门兜底技术**：拦截 `window.beforeunload` 时，**统一使用 `fetch` 搭配 `keepalive: true`** 发射最后的自动保存与锁释放请求。后端接口必须适配此异步请求。
 
 ---
 
