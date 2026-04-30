@@ -1,4 +1,4 @@
-# 泰兴市国家统计局公文处理系统 V3.0 - 前端 UI 与界面架构设计方案
+# 国家统计局泰兴调查队公文处理系统 V3.0 - 前端 UI 与界面架构设计方案
 
 本方案集合了前端的**交互机制**、**底层状态流**以及**页面路由与模块视图**，作为全站前端的整体架构准则与施工图纸。
 
@@ -42,7 +42,7 @@
 ## 三、 核心页面布局原型定义 (Page Layouts)
 
 ### 1. 全局主框架 (App Shell)
-* **顶栏导航 (Header)**：高度 `64px`，背景白。左侧展示系统 Logo 及"泰兴市国家统计局系统"；右侧展示当前用户全称、科室信息，以及包含通知唤醒中心的铃铛图标（显示被驳回或任务完成的未读角标）。
+* **顶栏导航 (Header)**：高度 `64px`，背景白。左侧展示系统 Logo 及"国家统计局泰兴调查队公文处理系统"；右侧展示当前用户全称、科室信息，以及包含通知唤醒中心的铃铛图标（显示被驳回或任务完成的未读角标）。
 * **侧边菜单 (Sider)**：宽度 `240px`，政务蓝（或深色主题）。垂直导航。对应上方路由结构的几大一级模块入口。
 * **底部状态基座 (Footer)**：固定高度 `24px`，深灰色底。
     * 左下角：通过 `/api/v1/sys/status` 暴露的 AI 引擎探针状态（🟢 在线 / 🔴 离线）。
@@ -50,7 +50,7 @@
 
 ### 2. 个人工作台 (Dashboard View)
 页面分列为左右双栏瀑布流或顶部数据卡片 + 下方双栏。
-* **顶部快捷栏**：放置醒目的高亮发散按钮【➕ 起草新公文】（点击即触发 `/init` 并携带新 `doc_id` 路由跳转工作区）。
+* **顶部快捷栏**：放置醒目的高亮发散按钮【➕ 起草新公文】（点击弹出"新建公文"对话框，**用户必须选择公文文种**（`Select` 下拉，调用 `GET /api/v1/doc-types` 获取选项），确认后触发 `POST /init` 并携带 `doc_type_id`，分配 `doc_id` 后路由跳转工作区）。
 * **任务聚焦板 (Focus Board)**：
     * 若拥有审批权限：展示【待我签批】列表。
     * 个人事务：展示【我的公文任务】（包含正在进行的润色/排版进度）及【被驳回的公文】列表（红色标识驳回理由，附带一键唤醒 `revise` 回退编辑的按钮）。
@@ -61,19 +61,24 @@
 采用极其克制的无边框拟物风格结构。屏蔽全局左侧通用 Sider，进入全屏沉浸空间。
 
 * **左翼侧边栏 (VirtualDocTree)**：宽度弹性容纳（约 `280px`）。截断保护防撑爆：树节点必须注入 `min-width: 0` 和 `text-overflow: ellipsis`。下挂通过 `/api/v1/kb/hierarchy` 拉取的活体知识库目录树。叶子节点旁带有 Checkbox。用户在此处勾选往期台账或参考样表，直接作为短记忆 RAG 挂载上下文域（`context_kb_ids`）。
+  * **参考范文区（Exemplar Panel）**：侧边栏底部增加"📄 参考范文"折叠面板，默认展开。根据当前公文的 `doc_type_id` 自动从 `GET /api/v1/exemplars?doc_type_id=xxx` 获取对应文种的范文列表（`tier` 按权限过滤）。以 Radio 单选控件展示（一次只能选一份），选中时将 `exemplar_id` 写入 `useEditorStore.exemplarId`，同时展示范文标题与文种标签。置空按钮允许取消选择。
 * **顶部指挥带 (Action Bar)**：
     * 若处于**只读模式**：必须严格将 UI 状态拆分为以下两种互斥情况展示横幅，并拦截切断下方一切写入按钮与入口：
       1. **`READONLY_CONFLICT`**：由获取锁失败 409 冲突触发，居中黄色全宽警戒横带显示“XX 正在编辑，当前只读”。
       2. **`READONLY_IMMUTABLE`**：由 `document.status !== 'DRAFTING'` 触发，居中灰色或蓝色横带显示“公文已归档/流转中，不可编辑”。
       只读模式的核心判定策略必须遵循：**锁获取结果**为编辑权限的刚性控制优先级（强一致性）；而 `document.status` 的读取仅用于不可变状态的**辅助 UI 提示**判定（最终一致性）。
-    * **操作按钮列**：左侧为返回及状态灯。中区提供 `[历史快照 ⏱]` 唤醒兜底系统。右侧放置业务器：紫金色的 `[AI 智能润色]`、`[GB国标排版并下载]` 及起草流收尾的 `[提交审批]`。所有并排按钮包裹防折行容器内。
+    * **操作按钮列**：左侧为返回及状态灯，同时显示只读的**文种标签**（如"通知"、"请示"，初始化时已锁定，`SUBMITTED` 后不可改）。中区提供 `[历史快照 ⏱]` 唤醒兜底系统。右侧放置业务器：紫金色的 `[AI 智能润色]`、`[GB国标排版并下载]` 及起草流收尾的 `[提交审批]`。所有并排按钮包裹防折行容器内。若公文处于 `APPROVED` 状态且排版产物 `word_output_path` 存在，排版按钮替换为 `[下载国标文档 📥]`；若排版任务 `FAILED`，则显示`[重新排版]`（橙色警示）。
 * **中央纸基承载域 (Scroll Container)**：通过 A4 引擎呈现拟真物理白纸，深厚投影灰色托底（详见第四章 A4 引擎细则）。
 * **右侧扩展区**：隐式加载的 `Drawer` 等部件储备层。
 
 ### 4. 统计知识资产库 (Knowledge Base Admin)
 类似企业云盘视图设计，分为顶部统计筛选区和底端详细文件管廊。
-* **资源分仓顶导 (Tabs)**：`[ 个人沙箱库 ] | [ 科室共享库 ] | [ 全局基础库 ]` （根据 `useAuthStore` 控制权限灰显锁定与否）。
+* **资源分仓顶导 (Tabs)**：`[ 个人沙箱库 ] | [ 科室共享库 ] | [ 全局基础库 ] | [ 参考范文 ]` （根据 `useAuthStore` 控制权限灰显锁定与否）。
 * **内容视图与操作**：展现资产名、按 `file_version` 定义的版本号与 `CORE`/`IMPORTANT` 红黄徽章。悬浮执行版调配更新、触发弹窗确认级联 DAO 软删除或实时观望解析 `PARSE` 小圆环状态等功能。
+* **参考范文 Tab（Exemplar Library）**：
+  * 顶部提供按文种（`doc_type_id`）过滤的下拉筛选，以及"上传新范文"按钮（权限：管理员 `role_level>=99` 或科室负责人 `dept_head_id`，且**仅接受 `.docx` 格式**）。
+  * 列表展示范文卡片：标题、文种标签、上传者、上传时间。悬浮提供"预览文本"（调用 `GET /api/v1/exemplars/{id}/preview`，弹出 Modal 展示提取的纯文本）和"软删除"操作（删除前后端检查草稿引用，有引用则拒绝并提示）。
+  * 上传流程：弹出上传 Drawer → 选择文件（`.docx` 格式限定）→ 填写范文标题 → 选择关联文种 → 确认上传。后端处理完成后刷新列表。
 
 ### 5. 科长签批管控台 (Approval Board)
 界面必须呈现严谨庄重的复核体感环境结构。仅向具备负责人角色展现。
@@ -85,44 +90,80 @@
 * **左置历史流 (History)** 及 **右置悬浮树 (Scoped Panel)** （提供挂钩检索边界限定）。主对话区采用 ToolTips 展示引用自某个特定 `<CHUNK>` 特征块的确切台账截留坐标。并具备应对查询失焦的硬干预话术“未探明对应统计线索”等降级展位。
 
 ### 7. 系统中枢设置 (System Settings Console)
-承担全系统的权限治理、安全审计及底层基建参数监控，该模块界面依据用户的权级呈现阶梯式功能展现。
-* **用户与组织矩阵**：树状掌控内设科室、指配 `dept_head_id` 高层、统一施加 `role_level`（普通职员1、科长5、管理员99）与全局密码复位。
-* **安全审计与容灾观测台**：依赖 `trace_id` 或者公文指纹溯源调阅只读状态的 `nbs_workflow_audit` 日志流。并向异常 `retry_count`（>3次）爆发死信的 `async_tasks` 提供【查栈及手动肃清】操作柄。
-* **强控制悲观锁大盘**：列表监控活跃挂钩 Redis 的占用凭证。具备处理天灾断线的超管特权：执行红色醒目的【强制斩断锁联结并驱逐】功能。
-* **全局基建动态嗅探**：提供修订 `lock_ttl_seconds` 及 Ollama Http 超时限长阈等参数的控制表单，配置触发清理死缓文件的强力唤醒按键。
+承担全系统的权限治理、安全审计、AI 配置及底层基建参数监控。采用**左侧垂直 Tab 导航 + 右侧内容区**的主从布局，依据用户权级呈现阶梯式功能展现（`role_level >= 5` 可见审计相关 Tab，`role_level >= 99` 可见全部 Tab）。
 
-### 2. 高精度锁控策略 (Lock Guard)
+#### 7.1 用户管理 (`role_level >= 99`)
+表格 CRUD 全部用户：工号、真实姓名、所属科室（下拉）、`role_level`（1/5/99 单选）、`is_active` 开关、密码重置按钮（弹窗二次确认）。停用用户时弹出警告"该用户将无法登录和执行任何操作"。停用后该用户后续所有请求返回 HTTP 403。
+
+#### 7.2 科室管理 (`role_level >= 99`)
+表格 CRUD 科室：科室名称、编码、科室负责人（`dept_head_id`，下拉选本科室用户）、`is_active` 开关。删除前检查关联用户和公文，有则拒绝（仅允许停用）。
+
+#### 7.3 公文文种管理 (`role_level >= 99`)
+表格展示 `document_types` 全部文种（含通用文档/调研分析/经济信息）：文种编码、中文名、`layout_rules` JSON 预览、启停开关。点击"编辑"弹出 Drawer，内含 Monaco JSON 编辑器，可编辑 `layout_rules`。"新增文种"按钮：输入编码、名称、`layout_rules` JSON。禁止删除已有引用的文种（改为软停用）。
+
+#### 7.4 提示词管理 (`role_level >= 99`)
+列表展示 `app/prompts/` 下所有文件名（`system_chat.txt`、`system_polish.txt` 等）及最后修改时间。点击文件名展开 Monaco 编辑器（纯文本模式），支持在线修改。保存前弹出 `Popconfirm`（"确认保存并热加载此提示词？此操作将立即影响所有 AI 输出"）；保存后自动调用 `POST /api/v1/sys/reload-prompts`；每次修改写入审计日志（记录操作人、时间、文件名）。右侧固定展示占位符参考面板（`{context}`、`{exemplar_text}`、`{doc_type_name}` 等含义说明）。
+
+#### 7.5 审计日志查询 (`role_level >= 5`)
+多条件筛选面板：公文 ID、操作人、时间范围、工作流节点类型（下拉）。表格分页展示 `nbs_workflow_audit` 记录。支持"导出 CSV"按钮。科长仅可查询本科室相关日志；管理员可查全局。
+
+#### 7.6 安全存证查询 (`role_level >= 5`)
+查询 `document_approval_logs` 存证记录。提供"校验 SIP 哈希"按钮：输入 `doc_id`，调用 `GET /documents/{doc_id}/verify-sip`，返回 ✅ 一致 / ❌ 被篡改，结果高亮展示。
+
+#### 7.7 锁监控大盘 (`role_level >= 99`)
+实时列表展示 Redis 中所有活跃的 `lock:{doc_id}` 记录：锁定者姓名、文档标题、锁定时长、TTL 剩余秒数（进度条）。每行提供红色"强制释放"按钮（`DELETE /locks/{lock_key}`），操作前弹出 `Popconfirm`，操作后写审计日志，被驱逐用户收到 `LOCK_RECLAIMED` SSE 事件强制进入只读模式。
+
+#### 7.8 任务监控大盘 (`role_level >= 99`)
+表格展示 `async_tasks` 全部记录，支持状态筛选（QUEUED/PROCESSING/COMPLETED/FAILED）。FAILED 行高亮红色，提供"查看错误堆栈"（Drawer 展示 `error_message`）和"重试"按钮（`retry_count < 3` 时可用）。提供批量"肃清"按钮（将 FAILED 任务标记为已处理，不删除记录）。
+
+#### 7.9 系统参数配置 (`role_level >= 99`)
+表单化配置管理，持久化至 `system_config` 表（调用 `PUT /api/v1/sys/config`），服务重启后不丢失：
+
+| 参数名 | 默认值 | 说明 |
+|---|---|---|
+| 编辑锁 TTL（秒） | 180 | 锁超时时长 |
+| 心跳间隔（秒） | 90 | 锁续期频率 |
+| Ollama HTTP 超时（秒） | 120 | AI 推理超时阈值 |
+| AI 限流（次/分钟/用户） | 5 | 防恶意刷接口 |
+| 自动保存间隔（秒） | 60 | 草稿自动保存频率 |
+| 任务最大重试次数 | 3 | Celery 重试上限 |
+| GIN 索引清理批次大小 | 5000 | 软删除切片置空批次 |
+
+每项参数附带说明文字与合理范围校验（如锁 TTL 最小 30 秒，最大 600 秒），保存后即时生效。
+
+#### 7.10 系统健康监控 (`role_level >= 99`)
+Dashboard 卡片布局（调用 `GET /api/v1/sys/status`）：
+- 🟢/🔴 数据库连通性（`db_connected`）
+- 🟢/🔴 Redis 连通性（`redis_connected`）
+- 🟢/🔴 Celery Worker 活跃数（`celery_workers_active`）
+- 🟢/🔴 AI 引擎在线（`ai_engine_online`）
+- 📊 CPU 使用率 / 内存使用率（进度条）
+- 📦 `pg_dump` 最新快照时间与状态
+
+#### 7.11 数据库快照管理 (`role_level >= 99`)
+**快照列表**：表格展示历史快照文件（`GET /api/v1/sys/db-snapshots`）：快照时间、文件大小、触发人、状态（进行中/完成/失败）。
+- **创建快照**：点击"立即备份"按钮（`POST /api/v1/sys/db-snapshot`），触发后端异步 `pg_dump` 任务，进度通过 SSE 或轮询展示。操作写审计日志。
+- **恢复快照**：每行提供"恢复此快照"按钮（`POST /api/v1/sys/db-snapshots/{snapshot_id}/restore`）。**恢复操作必须经过双重确认**：第一步弹出 `Popconfirm` 说明"恢复操作将覆盖当前全量数据，操作不可逆，请确保已备份最新数据"；第二步要求用户在文本框中手动输入 `CONFIRM` 字样方可解锁执行按钮。操作执行后写 `CRITICAL` 级别审计日志。
+- **存储说明**：快照文件默认存储于服务器 `ARCHIVE_ROOT` 目录，前端展示文件路径和大小供管理员参考。
+
+#### 7.12 文件清理 (`role_level >= 99`)
+操作面板：
+- "清理临时文件"按钮（`POST /api/v1/sys/cleanup-cache`），展示上次执行时间与清理文件数。
+- "扫描孤立物理文件"按钮（`POST /api/v1/sys/scan-orphan-files`），查找无逻辑节点引用的 `knowledge_physical_files` 记录并列出，提供批量删除。
+- "GIN 索引维护"按钮（`POST /api/v1/sys/gin-maintenance`），手动触发软删除切片的 content 置空操作，展示影响行数。
+
+### 8. 沉浸式工作区 - 高精度锁控策略 (Lock Guard)
 * **Web Worker 心跳**：`useLockGuard` 必须启动一个 Web Worker 运行 `setInterval`。确保心跳请求不被浏览器节流（Throttling）干扰。
 * **续期校准**：心跳成功后，依据后端返回的 `next_suggested_heartbeat` 校准下次执行时间，并将 `lock_ttl_remaining` 同步至 UI 状态栏。
 
-### 3. 自动保存安全网 (Auto-Save Guard)
-* **失败预警**：当 `saveFailureCount >= 3` 时，通过 `notification.error` 强制阻断用户操作并提示“检测到网络异常或锁已失效，自动保存连续多次失败。请检查连接或手动复制内容防止丢失”。
-* **生命周期闭环**：`beforeunload` 时使用 `navigator.sendBeacon` 发送最后一次心跳与释放。
-    *   **权限响应**：非科室负责人或管理员，`DEPT`/`BASE` 的写入操作（上传/新建目录）应自动隐藏或禁用。
-* **多级目录树 (Knowledge Tree)**：
-    *   左侧展示虚拟文件树，支持无限级 `DIRECTORY` 嵌套。
-    *   **交互逻辑**：支持点击展开、右键菜单（上传到此处、新建文件夹、重命名、替换上传、删除）。
-* **上传面板 (Upload Console)**：
+* **生命周期闭环**：`beforeunload` 时使用 `fetch` 搭配 `keepalive: true` 发送最后一次心跳与释放。严禁使用 `sendBeacon`，因其无法携带复杂的认证 Header。
 
-### 8. 知识资产库视图 (Knowledge Base Explorer)
-
-知识库采用“网盘化”设计，兼顾层次感与操作便捷性。
-
-*   **分仓导航 (Tiered Tabs)**：
-    *   顶部提供 `PERSONAL`、`DEPT`、`BASE` 三个分仓 Tab 切换。
-    *   **权限响应**：非科室负责人或管理员，`DEPT`/`BASE` 的写入操作（上传/新建目录）应自动隐藏或禁用。
-*   **多级目录树 (Knowledge Tree)**：
-    *   左侧展示虚拟文件树，支持无限级 `DIRECTORY` 嵌套。
-    *   **交互逻辑**：支持点击展开、右键菜单（上传到此处、新建文件夹、重命名、替换上传、删除）。
-*   **上传面板 (Upload Console)**：
-    *   **多模态输入**：支持文件多选、文件夹拖拽及 `.zip/.tar.gz` 压缩包上传。
-    *   **安全标签注入**：上传过程中弹出浮层，强制用户为本次上传的资产选择安全等级（一般、重要、核心）。支持“一键应用到全部”。
-*   **资产状态可视化**：
-    *   `PARSING` (⏳)：节点图标显示循环加载动画，并伴随“AI 正在进行语义切片...”的 Tooltip。
-    *   `READY` (✅)：正常文件图标。
-    *   `FAILED` (❌)：红色警示图标，点击可查看后端返回的具体解析错误，并提供【重试】按钮。
-*   **版本管理交互**：
-    *   对选中文件点击“替换上传”，若后端返回“内容未变化”，前端以 `message.warning` 拦截并中断流程。
+### 8. 统计知识资产管理 (Knowledge Management)
+*   **三级分仓树**：左侧提供 `PERSONAL/DEPT/BASE` 的切换 Tab，支持点击展开、右键菜单（上传到此处、新建文件夹、重命名、替换上传、删除）。
+*   **权限响应**：非科室负责人或管理员，`DEPT`/`BASE` 的写入操作应自动隐藏或禁用。
+*   **多模式上传交互**：支持文件多选、文件夹拖拽及 `.zip/.tar.gz` 压缩包上传。上传时弹出抽屉，用户必须选择“安全等级”。
+*   **状态实时同步**：通过 SSE 监听解析进度（`UPLOADED` -> `PARSING` -> `READY`）。
+*   **关联起草**：勾选节点时，前端调用 `GET /snapshot-version` 捕获当前目录树的时间轴版本号，供 `polish` 请求提交。
 
 ---
 
@@ -159,6 +200,13 @@
 
 由于 AI 推理与文档排版均是长耗时操作，前端必须实现"发后即忘"（Fire-and-Forget）的非阻塞体验。
 
+### 1. 公文管理中心 (Document List View)
+* **常驻操作**：
+    * `[查看/编辑]`：点击进入工作区。
+    * `[下载 📥]`：仅 `APPROVED` 状态可见。
+    * `[前往修改]`：仅 `REJECTED` 状态可见，触发 `POST /revise`。
+* **批量操作**：支持勾选后批量软删除。
+
 ### 1. 骨架安抚动画 (Skeleton Pacifier)
 在触发"润色"或"排版"但任务仍在 `QUEUED` 或 `PROCESSING` 阶段时，在 A4 画板的正中央覆盖一层带有高斯模糊（`backdrop-filter: blur(2px)`）的加载层，并渲染从上至下扫描的 Ant Design `Skeleton` 动画，辅以文字"AI 正在研读挂载台账，请稍候..."。
 
@@ -189,6 +237,8 @@
 
 ### 1. `useEditorStore` (公文生命周期库)
 * `currentDocId: string | null`
+* `docTypeId: number | null` (当前公文文种 ID，创建时写入，工作区全程只读，仅用于过滤范文列表)
+* `exemplarId: number | null` (当前选中的参考范文 ID，随 `POST /tasks/polish` 请求体一并提交)
 * `content: string` (当前编辑器正文：在 DIFF 模式下，本段必须唯一指代左栏只读原稿，**严禁使用右栏内容污染 `content`**)
 * `aiPolishedContent: string | null` (AI 润色建议稿，用于 DIFF 模式)
 * `viewMode: 'SINGLE' | 'DIFF'` (双模态状态)
@@ -196,7 +246,7 @@
 * `context_snapshot_version: number` (勾选时从后端 `GET /api/v1/kb/snapshot-version` 接口获取的目录树版本号时间戳，用于防御目录树竞态；提交润色请求时随请求体一并发送)
 * `saveFailureCount: number` (保存失败计数器)
 * `lock_ttl_remaining: number` (锁剩余秒数，由后端自动保存/心跳响应更新)
-* **DIFF 模式草稿双轨保护**：进入 DIFF 模式时，先检查服务端 `draft_suggestion` 恢复，若空再检查 LocalStorage 缓存。在此模式下，定时器停止云端 `content` 同步。必须将右栏建议稿加密存入 `localStorage`（仅作崩溃极速恢复），同时调用专门针对此场景的 `POST /documents/{doc_id}/auto-save` 并将 payload 设计为 `{"draft_content": "修改后的建议稿"}`，将数据持久化推送到云端的 `draft_suggestion` 字段（主存储，用于跨终端恢复）。**请注意此处的架构权衡限制：由于 `draft_suggestion` 是单值字段，DIFF 模式下的每次自动保存只会覆盖最新的一份草稿，无法像 `content` 那样实现多版本的快照追溯**。在 `useEditorStore` 中，`persist` 机制利用 `partialize` 筛选，严格保证只会存储最近 2 次的本地快照序列以作短效极速恢复（其生命周期限制在本地提交审批或明确丢弃/接受合并时销毁，不可依赖此项作为灾变级历史源）。
+* **自动保存与 DIFF 模式草稿双轨保护**：在常规 `SINGLE` 模式下，定时器必须且只能在 payload 中携带 `{"content": "..."}` 键发送至 `/auto-save`。进入 `DIFF` 模式时，先检查服务端 `draft_suggestion` 恢复，若空再检查 LocalStorage 缓存。在此模式下，定时器停止云端 `content` 同步，必须将右栏建议稿加密存入 `localStorage`（仅作崩溃极速恢复），同时调用专门针对此场景的 `POST /api/v1/documents/{doc_id}/auto-save` 并**严格限定 payload 仅包含 `{"draft_content": "修改后的建议稿"}` 键（防呆过滤 `content` 键，避免触发后端 DIFF 保护拦截）**，将数据持久化推送到云端的 `draft_suggestion` 字段（主存储，用于跨终端恢复）。**请注意此处的架构权衡限制：由于 `draft_suggestion` 是单值字段，DIFF 模式下的每次自动保存只会覆盖最新的一份草稿，无法像 `content` 那样实现多版本的快照追溯**。在 `useEditorStore` 中，`persist` 机制利用 `partialize` 筛选，严格保证只会存储最近 2 次的本地快照序列以作短效极速恢复。
 * **云端后悔药机制 (Cloud Snapshot History)**：完全摒弃单机历史。在执行“接受润色”等操作前，**后端会自动创建备份快照**，前端仅需配合展示。列表拉取支持 `(page=1, page_size=20)` 分页。
 
 ### 2. `useAuthStore` (用户鉴权库)
