@@ -173,10 +173,13 @@
 
 ### 3. 驳回与锁回收通知交互
 * **驳回通知**：起草人收到 SSE 消息时，弹出 `notification.warning` 显示驳回理由，附带 `[前往修改]` 按钮触发 `revise`。
-* **锁被动回收 (Reclaim Notification)**：当后端因他人抢占（如驳回重起草）或管理员强制释放锁时，通过 SSE 推送 `LOCK_RECLAIMED` 事件。前端监听到该事件后，必须立刻执行以下动作：
-  1. 弹出 `modal.error` 提示“您的编辑权限已被回收（原因：xxx），当前已进入只读模式”。
+* **锁被动回收 (Reclaim Notification)**：当后端因他人抢占（如驳回重起草）或管理员强制释放锁时，通过 Redis Pub/Sub 向个人通知通道发布 `LOCK_RECLAIMED` 事件。前端通过专用 `useEditorNotifications` Hook 监听并响应：
+  * `useEditorNotifications` 负责维护一条**个人级 SSE 长连接**（调用 `GET /api/v1/sse/user-events`，通过 `POST /api/v1/sse/ticket` 换取绑定 `user_id` 的 Ticket）。该连接独立于任务 SSE 连接池，不占用最大 5 路并发配额，随用户登录状态保持存活。
+  * 前端监听到 `LOCK_RECLAIMED` 事件后，必须立刻执行以下动作：
+  1. 弹出 `modal.error` 提示"您的编辑权限已被回收（原因：xxx），当前已进入只读模式"。
   2. 将 `Editor` 组件设为 `readOnly: true`。
   3. 禁用所有保存与提交按钮。
+
 
 ---
 
@@ -190,7 +193,7 @@
 * `aiPolishedContent: string | null` (AI 润色建议稿，用于 DIFF 模式)
 * `viewMode: 'SINGLE' | 'DIFF'` (双模态状态)
 * `context_kb_ids: number[]` (当前勾选的知识库目录树节点 ID 数组)
-* `context_snapshot_version: number` (勾选时从后端获取的时间戳，用于防御目录树竞态)
+* `context_snapshot_version: number` (勾选时从后端 `GET /api/v1/kb/snapshot-version` 接口获取的目录树版本号时间戳，用于防御目录树竞态；提交润色请求时随请求体一并发送)
 * `saveFailureCount: number` (保存失败计数器)
 * `lock_ttl_remaining: number` (锁剩余秒数，由后端自动保存/心跳响应更新)
 * **DIFF 模式草稿双轨保护**：进入 DIFF 模式时，先检查服务端 `draft_suggestion` 恢复，若空再检查 LocalStorage 缓存。在此模式下，定时器停止云端 `content` 同步。必须将右栏建议稿加密存入 `localStorage`（仅作崩溃极速恢复），同时调用专门针对此场景的 `POST /documents/{doc_id}/auto-save` 并将 payload 设计为 `{"draft_content": "修改后的建议稿"}`，将数据持久化推送到云端的 `draft_suggestion` 字段（主存储，用于跨终端恢复）。**请注意此处的架构权衡限制：由于 `draft_suggestion` 是单值字段，DIFF 模式下的每次自动保存只会覆盖最新的一份草稿，无法像 `content` 那样实现多版本的快照追溯**。在 `useEditorStore` 中，`persist` 机制利用 `partialize` 筛选，严格保证只会存储最近 2 次的本地快照序列以作短效极速恢复（其生命周期限制在本地提交审批或明确丢弃/接受合并时销毁，不可依赖此项作为灾变级历史源）。
