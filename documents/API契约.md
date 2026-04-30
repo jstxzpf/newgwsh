@@ -121,4 +121,30 @@
 | `/exemplars/{id}` | `DELETE`| 管理员 | **软删除范文**。删除前检查当前是否有处于 `DRAFTING` 的草稿正在强引用该范文。 |
 
 ---
+
+## 9. 消息与通知 (`/api/v1/notifications`)
+
+| 接口路径 | HTTP | 权限 | 核心职责与参数 |
+|:---|:---:|:---|:---|
+| `/` | `GET` | 登录 | **获取通知列表**。Query: `page`, `page_size`, `is_read`。<br/>Res: `{"total": 5, "items": [{"notification_id", "doc_id", "type", "content", "is_read", "created_at"}]}`。 |
+| `/unread-count` | `GET` | 登录 | **获取未读通知数**。用于初始化或刷新时铃铛角标回显。<br/>Res: `{"unread_count": 3}`。 |
+| `/{id}/read` | `POST` | 登录 | **标记通知已读**。 |
+| `/read-all` | `POST` | 登录 | **一键已读全部**。 |
+
+---
+
+## 附录：SSE 事件协议规范 (SSE Event Protocols)
+
+在使用 `GET /api/v1/sse/{task_id}/events` 和 `GET /api/v1/sse/user-events` 时，后端必须遵循 Server-Sent Events 标准格式推送以下定义事件，确保前后端数据契约强制对齐。
+
+| 事件类型 (`event`) | 监听场景 | 载荷结构 (`data` JSON) | 说明 |
+|:---|:---|:---|:---|
+| `task.progress` | `/sse/{task_id}/events` | `{"task_id": "...", "progress_pct": 45}` | 任务进度更新。 |
+| `task.completed` | `/sse/{task_id}/events` | `{"task_id": "...", "doc_id": "...", "result_summary": {}}` | 任务成功完成，前端依据类型（排版/润色）触发下载或开启 DIFF 模式。 |
+| `task.failed` | `/sse/{task_id}/events` | `{"task_id": "...", "error_message": "..."}` | 任务失败，携带具体报错堆栈。 |
+| `notification.rejected` | `/sse/user-events` | `{"doc_id": "...", "rejection_reason": "..."}` | 审批驳回。前端需弹出 warning 通知框展示 `rejection_reason`。 |
+| `notification.approved` | `/sse/user-events` | `{"doc_id": "..."}` | 审批通过。前端需弹出 success 卡片引导用户下载。 |
+| `notification.lock_reclaimed` | `/sse/user-events` | `{"doc_id": "...", "reason": "..."}` | 锁被动回收驱逐。前端需弹出 error 模态框展示 `reason`，并降级至只读模式。 |
+
+---
 *文档版本：V3.0 API Contract | 最后更新：2026-04 | 状态：[已对齐基准]*

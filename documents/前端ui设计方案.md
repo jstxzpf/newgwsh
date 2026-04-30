@@ -42,7 +42,7 @@
 ## 三、 核心页面布局原型定义 (Page Layouts)
 
 ### 1. 全局主框架 (App Shell)
-* **顶栏导航 (Header)**：高度 `64px`，背景白。左侧展示系统 Logo 及"国家统计局泰兴调查队公文处理系统"；右侧展示当前用户全称、科室信息，以及包含通知唤醒中心的铃铛图标（显示被驳回或任务完成的未读角标）。
+* **顶栏导航 (Header)**：高度 `64px`，背景白。左侧展示系统 Logo 及"国家统计局泰兴调查队公文处理系统"；右侧展示当前用户全称、科室信息，以及包含通知唤醒中心的铃铛图标。**铃铛未读角标机制**：前端在初始加载或页面可见性恢复时，调用 `GET /api/v1/notifications/unread-count` 刷新角标；并在接收到任意 `notification.*` 的 SSE 事件时，动态增加角标计数。点击铃铛弹出消息抽屉拉取列表。
 * **侧边菜单 (Sider)**：宽度 `240px`，政务蓝（或深色主题）。垂直导航。对应上方路由结构的几大一级模块入口。
 * **底部状态基座 (Footer)**：固定高度 `24px`，深灰色底。
     * 左下角：通过 `/api/v1/sys/status` 暴露的 AI 引擎探针状态（🟢 在线 / 🔴 离线）。
@@ -219,8 +219,9 @@ Dashboard 卡片布局（调用 `GET /api/v1/sys/status`）：
     * **失败任务**：文案为“任务《xxx》执行失败，请前往任务中心查看”。提供“前往处理”按钮。
 * **断线补偿**：连接若是发生 `onerror` 被驱离时，必须在退避静默期间辅以发向底层 `task/status` 轮调询问同步可能流落未触发到前端队列中的迟点包裹。
 
-### 3. 驳回与锁回收通知交互
-* **驳回通知**：起草人收到 SSE 消息时，弹出 `notification.warning` 显示驳回理由，附带 `[前往修改]` 按钮触发 `revise`。
+### 3. 审批与流转通知交互
+* **驳回通知**：起草人收到 SSE `notification.rejected` 消息时，弹出 `notification.warning` 显示驳回理由，附带 `[前往修改]` 按钮触发 `revise`。
+* **审批通过通知**：起草人收到 SSE `notification.approved` 消息时，弹出 `notification.success` 卡片，文案为“公文《xxx》已批准通过，可下载正式文档”，提供 `[查看公文]` 和 `[下载文档]` 快捷按钮。以上通知均须同步增加铃铛未读角标计数。
 * **锁被动回收 (Reclaim Notification)**：当后端因他人抢占（如驳回重起草）或管理员强制释放锁时，通过 Redis Pub/Sub 向个人通知通道发布 `LOCK_RECLAIMED` 事件。前端通过专用 `useEditorNotifications` Hook 监听并响应：
   * `useEditorNotifications` 负责维护一条**个人级 SSE 长连接**（调用 `GET /api/v1/sse/user-events`，通过 `POST /api/v1/sse/ticket` 换取绑定 `user_id` 的 Ticket）。该连接独立于任务 SSE 连接池，不占用最大 5 路并发配额，随用户登录状态保持存活。
   * 前端监听到 `LOCK_RECLAIMED` 事件后，必须立刻执行以下动作：
@@ -250,7 +251,7 @@ Dashboard 卡片布局（调用 `GET /api/v1/sys/status`）：
 * **云端后悔药机制 (Cloud Snapshot History)**：完全摒弃单机历史。在执行“接受润色”等操作前，**后端会自动创建备份快照**，前端仅需配合展示。列表拉取支持 `(page=1, page_size=20)` 分页。
 
 ### 2. `useAuthStore` (用户鉴权库)
-* 存储 `token`、`userInfo`。提供 `logout()`。当全局拦截到 `401 Unauthorized` 自动路由至 `/login`。
+* 存储 `token`、`userInfo`。提供 `logout()`。当全局拦截到 `401 Unauthorized` 且属于被踢出时，自动路由至 `/login`。
 
 ### 3. `useTaskStore` (任务监控库)
 * `activeTaskIds: string[]` / `taskResults: Record<string, any>`：监管长耗时事件与处理失败回退节点。
@@ -281,6 +282,6 @@ Dashboard 卡片布局（调用 `GET /api/v1/sys/status`）：
 
 1. **操作台折行与加载锁定**：编辑器顶部的操作按钮包裹在折行容器中。**所有涉及 API 调用的操作（尤其删除/丢弃）必须挂载 `loading` 状态并配合 `disabled`属性**，防止重复提交及视觉闪烁。
 2. **绝对拦扣危险动作框**：所有的"删除"、"清空公文"、"终止任务"、"丢弃建议"均需搭载 `<Popconfirm>` 强制核实。
-3. **令牌静默续期**：`apiClient` 在捕获 `401 Unauthorized` 时，自动发起 `POST /auth/refresh` 使用 HttpOnly Cookie 中的 Refresh Token 申请新 Access Token 并在恢复后无感重发失败请求。
+3. **令牌静默续期与踢出识别**：`apiClient` 在捕获 `401 Unauthorized` 时，必须检查响应体的 `error_code`。若为 `SESSION_KICKED`，则阻断重试，弹出 `modal.warning` ("您的账号已在其他设备登录，请重新登录") 并跳转 `/login`；否则自动发起 `POST /auth/refresh` 使用 HttpOnly Cookie 中的 Refresh Token 申请新 Access Token 并在恢复后无感重发失败请求。
 4. **水印与滚动条标准化**：... (略)
 5. **表格解析态渲染**：知识库树节点依据 `parse_status` 动态展示加载态，阻断对 `PARSING` 状态文件的越权访问尝试。
