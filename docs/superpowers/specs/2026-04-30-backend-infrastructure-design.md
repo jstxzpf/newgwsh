@@ -1,58 +1,32 @@
-# 后端基础架构设计规格说明 (Backend Infrastructure Design Spec)
+# 后端基础设施初始化设计
 
-## 1. 概览
-本设计旨在为“国家统计局泰兴调查队公文处理系统 V3.0”搭建稳健的后端骨架。核心目标是实现 API 层的异步高性能处理与 Celery 后台任务的同步稳定性隔离，同时确立公文状态机和审计的硬性约束。
+**目标：** 初始化 FastAPI + Celery + PostgreSQL (pgvector) + Redis 的 Docker 开发环境。
 
-## 2. 容器化编排 (Docker Orchestration)
-使用 `docker-compose.yml` 管理全栈服务。
+**架构：**
+- **API 层：** 使用 FastAPI，通过 Uvicorn 运行。
+- **异步任务层：** 使用 Celery 处理耗时任务。
+- **持久化层：** PostgreSQL 15 + pgvector 扩展。
+- **缓存/消息代理：** Redis 5.0。
 
-### 2.1 服务定义
-- **db**: PostgreSQL 15 + `pgvector` 插件。
-- **redis**: Redis 5.0，作为 Celery Broker 和分布式锁存储。
-- **api**: FastAPI 应用，异步运行。
-- **worker**: Celery 应用，执行重型任务（AI、排版、解析）。
+**组件详细设计：**
 
-### 2.2 构建规范
-- **基础镜像**: `python:3.10-slim`。
-- **镜像源**: 针对国内环境，配置 `pip` 使用清华/阿里源，`apt` 使用 Debian 阿里源。
-- **最小化部署**: 采用多阶段构建，减少镜像体积。
+1.  **Dockerfile:**
+    - 使用 `python:3.10-slim`。
+    - 多阶段构建：`builder` 阶段安装依赖并导出为 wheels，`final` 阶段仅安装必要的运行环境。
+    - 镜像源：`pip` 使用清华源，`apt` 使用阿里源。
 
-## 3. 数据库与会话层 (Database & Session Layer)
-实现“异步与同步物理隔离”红线。
+2.  **Docker Compose:**
+    - `db`: 使用 `ankane/pgvector:v0.5.0`。映射 5432 端口。
+    - `redis`: 使用 `redis:5.0-alpine`。
+    - `api`: 构建自本地 `Dockerfile`，映射 8000 端口。设置环境变量 `DATABASE_URL`, `REDIS_URL`。
+    - `worker`: 构建自本地 `Dockerfile`，启动命令为 `celery -A app.tasks.celery_app worker --loglevel=info`。
 
-### 3.1 会话双轨制
-- **AsyncSessionLocal**: 基于 `asyncpg`，用于 `app/api/`。
-- **SyncSessionLocal**: 基于 `psycopg2`，用于 `app/tasks/worker.py`。
-- **隔离性**: `worker.py` 严禁导入 `asyncpg` 相关代码，防止协程冲突。
+3.  **数据流：**
+    - 客户端请求经由端口 8000 到达 FastAPI。
+    - FastAPI 通过 `SQLAlchemy` (asyncio) 与 PostgreSQL 交互。
+    - FastAPI 将任务发布到 Redis 队列。
+    - Celery Worker 从 Redis 获取任务并执行，必要时更新数据库。
 
-### 3.2 核心模型约束
-- **TimestampMixin**: 所有表包含 `created_at` 和 `updated_at`。
-- **软删除**: `is_deleted` 字段支持逻辑删除，RAG 检索时强制过滤。
-- **乐观锁**: `Document` 表包含 `version` 字段。
-
-## 4. 业务安全与状态机 (Business Guard & State Machine)
-
-### 4.1 状态机转换
-- **枚举**: `DRAFTING`, `SUBMITTED`, `APPROVED`, `REJECTED`。
-- **模型校验**: SQLAlchemy `@validates('status')` 钩子强制路径合法性（如 `APPROVED` 不可回退）。
-
-### 4.2 审计与存证
-- **nbs_workflow_audit**: Append-Only 模式，记录状态机流转轨迹。
-- **SIP 存证**: 签批时计算 HMAC-SHA256 指纹，使用标准化归一化文本。
-
-## 5. 异步任务与 AI 管理 (Async Tasks & AI Management)
-
-### 5.1 Celery 配置
-- **显式注册**: `celery_app.py` 中 `include=["app.tasks.worker"]`。
-- **结构化日志**: 使用 `structlog` 生成 JSON 格式日志。
-
-### 5.2 提示词热加载
-- **存储**: `app/prompts/*.txt`。
-- **单例加载**: `PromptLoader` 负责缓存与热重载。
-- **占位符**: 使用 `str.format_map` 安全渲染。
-
-## 6. 环境参数 (Environment Variables)
-- `POSTGRES_ASYNC_URL`: `postgresql+asyncpg://...`
-- `POSTGRES_SYNC_URL`: `postgresql+psycopg2://...`
-- `OLLAMA_BASE_URL`: 默认 `http://10.132.60.133:11434`
-- `SECRET_KEY`: 用于 JWT 和 SIP 签名。
+**测试策略：**
+- 验证 `docker compose build` 是否成功。
+- 后续将添加健康检查接口。
