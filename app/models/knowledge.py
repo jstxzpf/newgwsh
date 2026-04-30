@@ -76,5 +76,6 @@ class KnowledgeChunk(Base, TimestampMixin):
     content: Mapped[str] = mapped_column(Text, comment="切片文本内容")
     embedding: Mapped[Any] = mapped_column(Vector(1024), comment="向量数据(1024维)")
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, name="metadata", nullable=True, comment="扩展元数据")
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否软删除")
 
     kb_node = relationship("KnowledgeBaseHierarchy")

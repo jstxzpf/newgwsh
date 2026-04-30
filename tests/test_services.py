@@ -42,3 +42,48 @@ async def test_save_physical_file_deduplication(db_session):
     if os.path.exists(os.path.dirname(storage_path)):
         # 注意：这里我们只删除测试产生的目录
         pass 
+
+from app.services.knowledge_hierarchy import KnowledgeHierarchyService
+from app.models.knowledge import KnowledgeBaseHierarchy, KbType, KbTier, KnowledgeChunk
+import numpy as np
+
+@pytest.mark.asyncio
+async def test_recursive_soft_delete(db_session):
+    # 1. 构建目录树
+    root = await KnowledgeHierarchyService.create_node(
+        db_session, "Root", KbType.DIRECTORY, KbTier.BASE
+    )
+    sub = await KnowledgeHierarchyService.create_node(
+        db_session, "Sub", KbType.DIRECTORY, KbTier.BASE, parent_id=root.id
+    )
+    file = await KnowledgeHierarchyService.create_node(
+        db_session, "File", KbType.FILE, KbTier.BASE, parent_id=sub.id
+    )
+    
+    # 2. 为文件添加切片
+    chunk = KnowledgeChunk(
+        kb_id=file.id,
+        content="test content",
+        embedding=np.random.rand(1024).tolist()
+    )
+    db_session.add(chunk)
+    await db_session.commit()
+    
+    # 3. 执行递归删除
+    await KnowledgeHierarchyService.soft_delete_subtree(db_session, root.id)
+    
+    # 4. 验证
+    from sqlalchemy import select
+    # 检查目录
+    res = await db_session.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.id == root.id))
+    assert res.scalar_one().is_deleted is True
+    
+    res_sub = await db_session.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.id == sub.id))
+    assert res_sub.scalar_one().is_deleted is True
+    
+    res_file = await db_session.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.id == file.id))
+    assert res_file.scalar_one().is_deleted is True
+    
+    # 检查切片
+    res_chunk = await db_session.execute(select(KnowledgeChunk).where(KnowledgeChunk.kb_id == file.id))
+    assert res_chunk.scalar_one().is_deleted is True
