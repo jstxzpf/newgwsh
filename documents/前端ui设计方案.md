@@ -16,7 +16,7 @@
     * **`/knowledge`**：统计知识资产库（管理台账、上传与切片状态可视化）。
     * **`/chat`**：HRAG 智能穿透问答中心（带上下文挂载功能的对话板）。
     * **`/tasks`**：异步任务管理中心（全局 AI 推理与排版进度大盘，支持错误任务一键重试）。
-    * **`/approvals`**：科长签批管控台（仅“公文所属科室中 `role_level >= 5` 的用户”或“科室负责人 `dept_head_id`”可见，处理同科室提交审核的公文）。
+    * **`/approvals`**：科长签批管控台（仅满足以下条件之一的用户可见：① `dept_head_id == current_user.user_id`（科室负责人绑定）；② `role_level >= 5` 且 `dept_id == doc.dept_id`（同科室高权限用户），**且 `is_active == True`**，处理同科室提交审核的公文）。
     * **`/settings`**：系统中枢设置台（全局防线参数监控、安全审计溯源、账户及死锁重置等，具备基于角色的阶梯展示）。
 
 ---
@@ -34,7 +34,7 @@
 
 ### 2. 全局防泄密水印 (`AntiLeakWatermark`)
 * 采用覆盖整个 `#root` 的绝对定位蒙层（`pointer-events: none`）。
-* 从 `useAuthStore` 及 `/api/v1/auth/me` 返回值中动态提取当前用户的 `username`（作为统一登录工号）、`department_name` 及当前时间组成复合标识，全环节术语统一以此字段作为身份标记防混淆（注意：水印内严禁显示 `client_ip` 以免引发敏感隐私合规问题）。
+* 从 `useAuthStore` 及 `/api/v1/auth/me` 返回值中动态提取当前用户的 `username`（统一登录工号）、`full_name`（真实姓名）、`department_name`（所在科室）及当前时间组成复合标识，全环节术语统一以此字段作为身份标记防混淆（注意：水印内严禁显示 `client_ip` 以免引发敏感隐私合规问题）。
 * 以 `rotate(-20deg)` 斜向平铺，透明度设为极限的 `opacity: 0.08`，实现静默追责与截屏溯源。
 
 ---
@@ -54,8 +54,8 @@
 * **任务聚焦板 (Focus Board)**：
     * 若拥有审批权限：展示【待我签批】列表。
     * 个人事务：展示【我的公文任务】（包含正在进行的润色/排版进度）及【被驳回的公文】列表（红色标识驳回理由，附带一键唤醒 `revise` 回退编辑的按钮）。
-* **异步任务中心 (GlobalTaskCenter)**：展示全局所有异步任务（POLISH/FORMAT/PARSE）的实时进度条、状态及错误堆栈。支持对 `FAILED` 任务发起重试。
-* **近期处理台**：最近修改的 `DRAFTING` 状态的公文轮播列表页，方便接续草拟。
+* **异步任务中心 (GlobalTaskCenter)**：展示全局所有异步任务（POLISH/FORMAT/PARSE）的实时进度条、状态及错误堆栈。“重试”按钮**仅对 `role_level >= 99`（管理员）展示**，普通用户只能查看任务状态。
+* **高频防泄密水印**：针对安全等级为 `IMPORTANT` 的统计公文及知识库台账，通过 Canvas 绘制 `姓名+部门+系统当前时间` 斜向水印，覆盖整个工作区与右侧建议区。利用 `MutationObserver` 严防通过 DevTools 删改 DOM 来去除水印。**水印渲染的数据源说明：`useAuthStore` 在登录成功后必须立即调用 `/api/v1/auth/me` 接口补全 `full_name` 和 `department_name` 等完整信息，水印组件直接从 Store 单一数据源读取，避免在组件内发起异步请求造成水印闪烁或绕过。**
 
 ### 3. 沉浸式公文工作区 (Workspace View - 核心心脏)
 采用极其克制的无边框拟物风格结构。屏蔽全局左侧通用 Sider，进入全屏沉浸空间。
@@ -66,7 +66,7 @@
     * 若处于**只读模式**：必须严格将 UI 状态拆分为以下两种互斥情况展示横幅，并拦截切断下方一切写入按钮与入口：
       1. **`READONLY_CONFLICT`**：由获取锁失败 409 冲突触发，居中黄色全宽警戒横带显示“XX 正在编辑，当前只读”。
       2. **`READONLY_IMMUTABLE`**：由 `document.status !== 'DRAFTING'` 触发，居中灰色或蓝色横带显示“公文已归档/流转中，不可编辑”。
-      只读模式的核心判定策略必须遵循：**锁获取结果**为编辑权限的刚性控制优先级（强一致性）；而 `document.status` 的读取仅用于不可变状态的**辅助 UI 提示**判定（最终一致性）。
+    只读模式的核心判定策略必须遵循：**锁获取结果**为编辑权限的刚性控制优先级（强一致性）；而 `document.status` 的读取仅用于不可变状态的**辅助 UI 提示**判定（最终一致性）。
     * **操作按钮列**：左侧为返回及状态灯，同时显示只读的**文种标签**（如"通知"、"请示"，初始化时已锁定，`SUBMITTED` 后不可改）。中区提供 `[历史快照 ⏱]` 唤醒兜底系统。右侧放置业务器：紫金色的 `[AI 智能润色]`、`[GB国标排版并下载]` 及起草流收尾的 `[提交审批]`。所有并排按钮包裹防折行容器内。若公文处于 `APPROVED` 状态且排版产物 `word_output_path` 存在，排版按钮替换为 `[下载国标文档 📥]`；若排版任务 `FAILED`，则显示`[重新排版]`（橙色警示）。
 * **中央纸基承载域 (Scroll Container)**：通过 A4 引擎呈现拟真物理白纸，深厚投影灰色托底（详见第四章 A4 引擎细则）。
 * **右侧扩展区**：隐式加载的 `Drawer` 等部件储备层。
@@ -158,7 +158,7 @@ Dashboard 卡片布局（调用 `GET /api/v1/sys/status`）：
 
 * **生命周期闭环**：`beforeunload` 时使用 `fetch` 搭配 `keepalive: true` 发送最后一次心跳与释放。严禁使用 `sendBeacon`，因其无法携带复杂的认证 Header。
 
-### 8. 统计知识资产管理 (Knowledge Management)
+### 9. 统计知识资产管理 (Knowledge Management)
 *   **三级分仓树**：左侧提供 `PERSONAL/DEPT/BASE` 的切换 Tab，支持点击展开、右键菜单（上传到此处、新建文件夹、重命名、替换上传、删除）。
 *   **权限响应**：非科室负责人或管理员，`DEPT`/`BASE` 的写入操作应自动隐藏或禁用。
 *   **多模式上传交互**：支持文件多选、文件夹拖拽及 `.zip/.tar.gz` 压缩包上传。上传时弹出抽屉，用户必须选择“安全等级”。
@@ -207,19 +207,22 @@ Dashboard 卡片布局（调用 `GET /api/v1/sys/status`）：
     * `[前往修改]`：仅 `REJECTED` 状态可见，触发 `POST /revise`。
 * **批量操作**：支持勾选后批量软删除。
 
-### 1. 骨架安抚动画 (Skeleton Pacifier)
+### 2. 骨架安抚动画 (Skeleton Pacifier)
 在触发"润色"或"排版"但任务仍在 `QUEUED` 或 `PROCESSING` 阶段时，在 A4 画板的正中央覆盖一层带有高斯模糊（`backdrop-filter: blur(2px)`）的加载层，并渲染从上至下扫描的 Ant Design `Skeleton` 动画，辅以文字"AI 正在研读挂载台账，请稍候..."。
 
-### 2. 全局无头守望者 (`GlobalTaskWatcher.tsx`)
+### 3. 全局无头守望者 (`GlobalTaskWatcher.tsx`)
 * **隐身组件**：挂载在 `<App />` 的最顶层结构中，不占据任何 DOM 视觉空间。
-* **职责与通信**：全局监听 `useTaskStore` 中的活跃任务，此囊括文档队列甚至 `PARSE` 切片行为。先发起请求体附带 `{"task_id": "uuid"}` 去 `/api/v1/sse/ticket` 开具 Ticket 随后叩动 EventSource 源头建立通道防泄密截获。**建立严苛的多路并行业务轨**：以 `task_id` 为映射 Key 维护多实例 EventSource 句柄表；管控最大并发 SSE 连接池（如上限必须设定为 `≤5`），若跨过峰值强制挂起并警告排队；一旦任意单体任务接收到 `COMPLETED`、`FAILED` 断语后，立刻注销关闭特定的 EventSource 流道封堵内存外泄并卸载轮询。
+* **职责与通信**：全局监听 `useTaskStore` 中的活跃任务，此囊括文档队列甚至 `PARSE` 切片行为。先发起请求体附带 `{"task_id": "uuid"}` 去 `/api/v1/sse/ticket` 开具 Ticket 随后叩动 EventSource 源头建立通道防泄密截获。**建立严苛的多路并行业务轨**：以 `task_id` 为映射 Key 维护多实例 EventSource 句柄表；管控最大并发 SSE 连接池（上限必须设定为 `≤5`，**注意：此配额仅管控任务级 SSE 连接，`useEditorNotifications` 的个人级 SSE 长连接独立于此池，不占用该配额，详见§五.4**），若跨过峰值强制挂起并警告排队；一旦任意单体任务接收到 `COMPLETED`、`FAILED` 断语后，立刻注销关闭特定的 EventSource 流道封堵内存外泄并卸载轮询。
 * **闭环接管通知**：一旦接收到 `COMPLETED`，右下角弹出 Notification 通知卡片。
     * **润色任务**：文案为“公文《xxx》的AI润色已完成。点击查看详情”。提供“查看详情”按钮（跳转至工作区并开启 DIFF）及“忽略”按钮。
     * **排版任务**：文案为“公文《xxx》国标排版已完成，点击下载”。提供“立即下载”按钮。
     * **失败任务**：文案为“任务《xxx》执行失败，请前往任务中心查看”。提供“前往处理”按钮。
-* **断线补偿**：连接若是发生 `onerror` 被驱离时，必须在退避静默期间辅以发向底层 `task/status` 轮调询问同步可能流落未触发到前端队列中的迟点包裹。
+* **断线补偿与受控重连（防死循环铁律）**：浏览器原生 `EventSource` 在 `onerror` 后会自动用初始 URL（含已焚毁的 `?ticket=xxx`）重连，必然触发 401/403 死循环。`GlobalTaskWatcher` 必须实现以下受控重连策略，**严禁依赖 `EventSource` 原生自动重连**：
+  1. **立即关闭**：`EventSource.onerror` 触发时，立即调用 `eventSource.close()` 终止实例，阻断原生重连。
+  2. **重建流程**：在退避等待后（首次 2s，之后指数退避至上限 30s），重走完整流程：`POST /sse/ticket`（申请新 Ticket）→ 使用新 Ticket 创建全新 `EventSource` 实例。
+  3. **连续失败降级**：若 30 秒内连续重建失败超过 3 次，**立即放弃 SSE 模式**，改为对 `GET /api/v1/tasks/{task_id}` 进行指数退避轮询（2s → 4s → 8s → 上限 30s），确保状态最终一致性。同时在 UI 上以黄色角标提示"实时连接不稳定，已切换为轮询补偿模式"。
 
-### 3. 审批与流转通知交互
+### 4. 审批与流转通知交互
 * **驳回通知**：起草人收到 SSE `notification.rejected` 消息时，弹出 `notification.warning` 显示驳回理由，附带 `[前往修改]` 按钮触发 `revise`。
 * **审批通过通知**：起草人收到 SSE `notification.approved` 消息时，弹出 `notification.success` 卡片，文案为“公文《xxx》已批准通过，可下载正式文档”，提供 `[查看公文]` 和 `[下载文档]` 快捷按钮。以上通知均须同步增加铃铛未读角标计数。
 * **锁被动回收 (Reclaim Notification)**：当后端因他人抢占（如驳回重起草）或管理员强制释放锁时，通过 Redis Pub/Sub 向个人通知通道发布 `LOCK_RECLAIMED` 事件。前端通过专用 `useEditorNotifications` Hook 监听并响应：
@@ -247,8 +250,10 @@ Dashboard 卡片布局（调用 `GET /api/v1/sys/status`）：
 * `context_snapshot_version: number` (勾选时从后端 `GET /api/v1/kb/snapshot-version` 接口获取的目录树版本号时间戳，用于防御目录树竞态；提交润色请求时随请求体一并发送)
 * `saveFailureCount: number` (保存失败计数器)
 * `lock_ttl_remaining: number` (锁剩余秒数，由后端自动保存/心跳响应更新)
-* **自动保存与 DIFF 模式草稿双轨保护**：在常规 `SINGLE` 模式下，定时器必须且只能在 payload 中携带 `{"content": "..."}` 键发送至 `/auto-save`。进入 `DIFF` 模式时，先检查服务端 `draft_suggestion` 恢复，若空再检查 LocalStorage 缓存。在此模式下，定时器停止云端 `content` 同步，必须将右栏建议稿加密存入 `localStorage`（仅作崩溃极速恢复），同时调用专门针对此场景的 `POST /api/v1/documents/{doc_id}/auto-save` 并**严格限定 payload 仅包含 `{"draft_content": "修改后的建议稿"}` 键（防呆过滤 `content` 键，避免触发后端 DIFF 保护拦截）**，将数据持久化推送到云端的 `draft_suggestion` 字段（主存储，用于跨终端恢复）。**请注意此处的架构权衡限制：由于 `draft_suggestion` 是单值字段，DIFF 模式下的每次自动保存只会覆盖最新的一份草稿，无法像 `content` 那样实现多版本的快照追溯**。在 `useEditorStore` 中，`persist` 机制利用 `partialize` 筛选，严格保证只会存储最近 2 次的本地快照序列以作短效极速恢复。
+* `isBusy: boolean` (提交锁定状态。在执行提交审批、接受/丢弃润色等异步操作前置 true，完成后恢复 false，联动全局按钮的 loading/disabled 状态，防止重复点击)
+* **自动保存与 DIFF 模式草稿双轨保护**：在常规 `SINGLE` 模式下，定时器必须且只能在 payload 中携带 `{"content": "..."}` 键发送至 `/auto-save`。进入 `DIFF` 模式时，恢复逻辑以服务端 `draft_suggestion` 为唯一真相源。在此模式下，定时器停止云端 `content` 同步，**直接调用专门针对此场景的 `POST /api/v1/documents/{doc_id}/auto-save` 并严格限定 payload 仅包含 `{"draft_content": "修改后的建议稿"}` 键（防呆过滤 `content` 键，避免触发后端 DIFF 保护拦截）**，将数据持久化推送到云端的主存储。`localStorage` 仅在网络断开且用户未刷新页面时作为纯内存兜底，**不参与**常规的跨终端或刷新恢复。**请注意此处的架构权衡限制：由于 `draft_suggestion` 是单值字段，DIFF 模式下的每次自动保存只会覆盖最新的一份草稿，无法像 `content` 那样实现多版本的快照追溯**。在 `useEditorStore` 中，废除原有的短效极速恢复缓存逻辑，全面向云端真相源靠拢。
 * **云端后悔药机制 (Cloud Snapshot History)**：完全摒弃单机历史。在执行“接受润色”等操作前，**后端会自动创建备份快照**，前端仅需配合展示。列表拉取支持 `(page=1, page_size=20)` 分页。
+* **跨终端 DIFF 模式恢复主从关系**：前端 Zustand `viewMode` 仅为当前终端的 UI 状态缓存。**当跨终端调取文档或刷新恢复时，以后端 `documents.ai_polished_content` 字段非空为 DIFF 模式的恢复判定依据（云端为主，前端 Zustand 为辅）**。若检测到该字段非空，前端强制复原为 DIFF 对比模式；若同时存在 `draft_suggestion` 字段，则直接加载服务端的二改草稿作为右栏内容。
 
 ### 2. `useAuthStore` (用户鉴权库)
 * 存储 `token`、`userInfo`。提供 `logout()`。当全局拦截到 `401 Unauthorized` 且属于被踢出时，自动路由至 `/login`。
@@ -274,7 +279,7 @@ Dashboard 卡片布局（调用 `GET /api/v1/sys/status`）：
     1. **`READONLY_CONFLICT`**：获取锁 409 冲突。黄色横幅提示“XX 正在编辑，当前只读”。
     2. **`READONLY_IMMUTABLE`**：公文状态非 `DRAFTING`。蓝色/灰色横幅提示“公文流转中，不可编辑”。
   * **自动恢复**：只读模式下引入指数退避（2s, 4s, 8s... 至 30s）自动重试 `acquire`。
-* **卸载生死门兜底技术**：拦截 `window.beforeunload` 时，**统一使用 `fetch` 搭配 `keepalive: true`** 发射最后的自动保存与锁释放请求。后端接口必须适配此异步请求。
+* **卸载生死门兜底技术**：拦截 `window.beforeunload` 时，**统一使用 `fetch` 搭配 `keepalive: true`** 向 `POST /locks/release` 发送单一请求，payload 中**同时携带最新正文内容与锁凭证** `{"content": "...", "lock_token": "..."}`。后端在释放锁前先执行保存操作（合并为单一原子请求）。**严禁将 auto-save 与 release 拆分为两个并发请求**——并发场景下若 release 先到达释放锁后，另一用户可能立即抢锁成功，此时 auto-save 因锁持有者不匹配被拒绝，将导致最后一次编辑内容丢失。
 
 ---
 

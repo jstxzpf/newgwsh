@@ -33,7 +33,7 @@ async def test_save_physical_file_deduplication(db_session):
     
     # 检查数据库更新
     from sqlalchemy import select
-    res = await db_session.execute(select(KnowledgePhysicalFile).where(KnowledgePhysicalFile.id == phys_id_1))
+    res = await db_session.execute(select(KnowledgePhysicalFile).where(KnowledgePhysicalFile.file_id == phys_id_1))
     phys = res.scalar_one()
     assert phys.security_level == SecurityLevel.CORE
 
@@ -54,36 +54,39 @@ async def test_recursive_soft_delete(db_session):
         db_session, "Root", KbType.DIRECTORY, KbTier.BASE
     )
     sub = await KnowledgeHierarchyService.create_node(
-        db_session, "Sub", KbType.DIRECTORY, KbTier.BASE, parent_id=root.id
+        db_session, "Sub", KbType.DIRECTORY, KbTier.BASE, parent_id=root.kb_id
     )
     file = await KnowledgeHierarchyService.create_node(
-        db_session, "File", KbType.FILE, KbTier.BASE, parent_id=sub.id
+        db_session, "File", KbType.FILE, KbTier.BASE, parent_id=sub.kb_id
     )
     
     # 2. 为文件添加切片
     chunk = KnowledgeChunk(
-        kb_id=file.id,
+        kb_id=file.kb_id,
+        physical_file_id=1, # 假定 ID
         content="test content",
-        embedding=np.random.rand(1024).tolist()
+        embedding=np.random.rand(1024).tolist(),
+        kb_tier=KbTier.BASE,
+        security_level=SecurityLevel.GENERAL
     )
     db_session.add(chunk)
     await db_session.commit()
     
     # 3. 执行递归删除
-    await KnowledgeHierarchyService.soft_delete_subtree(db_session, root.id)
+    await KnowledgeHierarchyService.soft_delete_subtree(db_session, root.kb_id)
     
     # 4. 验证
     from sqlalchemy import select
     # 检查目录
-    res = await db_session.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.id == root.id))
+    res = await db_session.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.kb_id == root.kb_id))
     assert res.scalar_one().is_deleted is True
     
-    res_sub = await db_session.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.id == sub.id))
+    res_sub = await db_session.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.kb_id == sub.kb_id))
     assert res_sub.scalar_one().is_deleted is True
     
-    res_file = await db_session.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.id == file.id))
+    res_file = await db_session.execute(select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.kb_id == file.kb_id))
     assert res_file.scalar_one().is_deleted is True
     
     # 检查切片
-    res_chunk = await db_session.execute(select(KnowledgeChunk).where(KnowledgeChunk.kb_id == file.id))
+    res_chunk = await db_session.execute(select(KnowledgeChunk).where(KnowledgeChunk.kb_id == file.kb_id))
     assert res_chunk.scalar_one().is_deleted is True

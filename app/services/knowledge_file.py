@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.knowledge import KnowledgePhysicalFile, SecurityLevel
@@ -12,45 +13,44 @@ class KnowledgeFileService:
         file_content: bytes, 
         filename: str, 
         security_level: SecurityLevel
-    ) -> tuple[int, bool]:
+    ) -> tuple[int, Optional[int]]:
         """
         保存物理文件并去重。
-        返回: (physical_file_id, needs_reparse)
+        返回: (physical_file_id, existing_kb_id_for_reuse)
         """
         content_hash = calculate_hash(file_content)
         
-        # 1. 检查哈希是否存在
-        stmt = select(KnowledgePhysicalFile).where(KnowledgePhysicalFile.content_hash == content_hash)
-        result = await db.execute(stmt)
-        existing = result.scalar_one_or_none()
+        # 1. 检查物理文件是否存在
+        stmt_phys = select(KnowledgePhysicalFile).where(KnowledgePhysicalFile.content_hash == content_hash)
+        phys = (await db.execute(stmt_phys)).scalar_one_or_none()
         
-        if existing:
-            # 去重逻辑：若新安全等级更高，标记需重新解析
-            needs_reparse = security_level.value > existing.security_level.value
-            if needs_reparse:
-                # 更新安全等级
-                existing.security_level = security_level
-                await db.commit()
-            return existing.id, needs_reparse
+        if not phys:
+            # 存储到磁盘
+            rel_path = get_storage_path(content_hash, filename)
+            abs_path = os.path.join(settings.STORAGE_ROOT, rel_path)
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+            with open(abs_path, "wb") as f:
+                f.write(file_content)
+            
+            phys = KnowledgePhysicalFile(
+                file_path=rel_path,
+                content_hash=content_hash,
+                file_size=len(file_content),
+                mime_type="application/octet-stream"
+            )
+            db.add(phys)
+            await db.commit()
+            await db.refresh(phys)
         
-        # 2. 存储到磁盘
-        rel_path = get_storage_path(content_hash, filename)
-        abs_path = os.path.join(settings.STORAGE_ROOT, rel_path)
-        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        # 2. 检查是否有【等级一致】且【已就绪】的逻辑节点可供复用
+        # 根据《实施约束规则》: 等级不一致(升级或降级)均严禁复用
+        from app.models.knowledge import KnowledgeBaseHierarchy
+        stmt_node = select(KnowledgeBaseHierarchy).where(
+            KnowledgeBaseHierarchy.physical_file_id == phys.file_id,
+            KnowledgeBaseHierarchy.security_level == security_level,
+            KnowledgeBaseHierarchy.parse_status == "READY",
+            KnowledgeBaseHierarchy.is_deleted == False
+        ).limit(1)
+        existing_node = (await db.execute(stmt_node)).scalar_one_or_none()
         
-        with open(abs_path, "wb") as f:
-            f.write(file_content)
-        
-        # 3. 记录到数据库
-        new_phys = KnowledgePhysicalFile(
-            file_path=rel_path,
-            content_hash=content_hash,
-            file_size=len(file_content),
-            mime_type="application/octet-stream", 
-            security_level=security_level
-        )
-        db.add(new_phys)
-        await db.commit()
-        await db.refresh(new_phys)
-        
-        return new_phys.id, True # 新文件始终需要解析
+        return phys.file_id, existing_node.kb_id if existing_node else None
