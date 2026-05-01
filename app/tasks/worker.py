@@ -70,13 +70,26 @@ def parse_knowledge(kb_id: int, task_id: str = None):
                     progress = 30 + int((i + 1) / len(chunks) * 60)
                     publish_event(task_id, "task.progress", {"progress_pct": progress})
 
-            node.parse_status = "READY"
-            session.commit()
-            if task_id: publish_event(task_id, "task.completed", {"kb_id": kb_id})
-            return f"Parsed {len(chunks)} chunks"
+            with SyncSessionLocal() as final_session:
+                final_node = final_session.execute(
+                    select(KnowledgeBaseHierarchy).where(KnowledgeBaseHierarchy.kb_id == node.kb_id).with_for_update()
+                ).scalar_one_or_none()
+                
+                if final_node and not final_node.is_deleted:
+                    final_node.parse_status = "READY"
+                    final_session.commit()
+                    if task_id: publish_event(task_id, "task.completed", {"kb_id": kb_id})
+                    return f"Parsed {len(chunks)} chunks"
+                else:
+                    msg = "ABORTED: Node deleted during parsing"
+                    if task_id: publish_event(task_id, "task.failed", {"error": msg})
+                    return msg
         except Exception as e:
-            node.parse_status = "FAILED"
-            session.commit()
+            with SyncSessionLocal() as err_session:
+                 err_node = err_session.get(KnowledgeBaseHierarchy, kb_id)
+                 if err_node:
+                     err_node.parse_status = "FAILED"
+                     err_session.commit()
             if task_id: publish_event(task_id, "task.failed", {"error": str(e)})
             return f"Error: {str(e)}"
 

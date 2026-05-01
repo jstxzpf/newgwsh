@@ -7,6 +7,8 @@ import { taskService } from '../../api/services';
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_WINDOW_MS = 30000;
 
+const MAX_CONCURRENT_SSE = 5;
+
 const GlobalTaskWatcher: React.FC = () => {
   const { activeTaskIds, removeTask } = useTaskStore();
   const eventSources = useRef<Record<string, EventSource>>({});
@@ -15,10 +17,24 @@ const GlobalTaskWatcher: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Determine how many tasks need SSE vs polling due to quota
+    let sseCount = Object.keys(eventSources.current).length;
+
     // Watch for new tasks in activeTaskIds
     activeTaskIds.forEach((taskId: string) => {
       if (!eventSources.current[taskId] && !pollingIntervals.current[taskId]) {
-        establishSSE(taskId);
+        if (sseCount < MAX_CONCURRENT_SSE) {
+          establishSSE(taskId);
+          sseCount++;
+        } else {
+          console.warn(`SSE pool full (max ${MAX_CONCURRENT_SSE}). Falling back to polling for task ${taskId}.`);
+          notification.warning({
+            message: '连接池已满',
+            description: '任务连接数过多，已切换为轮询补偿模式排队。',
+            duration: 4,
+          });
+          startPolling(taskId);
+        }
       }
     });
 

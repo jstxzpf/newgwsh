@@ -132,6 +132,19 @@ async def delete_exemplar(
     if count > 0:
         return error(code=409, message=f"Cannot delete exemplar: referenced by {count} drafting document(s)")
         
+    # 检查是否有正在处理或排队的POLISH任务依赖此范文
+    from app.models.task import AsyncTask, TaskType, TaskStatus
+    stmt_task = select(func.count(AsyncTask.task_id)).join(
+        Document, AsyncTask.doc_id == Document.doc_id
+    ).where(
+        AsyncTask.task_type == TaskType.POLISH,
+        AsyncTask.task_status.in_([TaskStatus.QUEUED, TaskStatus.PROCESSING]),
+        Document.exemplar_id == exemplar_id
+    )
+    task_count = (await db.execute(stmt_task)).scalar()
+    if task_count > 0:
+        return error(code=409, message=f"Cannot delete exemplar: referenced by {task_count} active polish task(s)")
+
     exemplar.is_deleted = True
     await db.commit()
     return success(message="Exemplar soft-deleted")

@@ -97,10 +97,10 @@ class KnowledgeHierarchyService:
         """)
         await db.execute(sql_hierarchy, {"root_id": root_id})
         
-        # 2. 标记相关的向量切片并置空向量 (从索引移除防幽灵查出 P4.2)
+        # 2. 标记相关的向量切片并置空向量与全文 (从索引移除防幽灵查出 P4.2)
         sql_chunks = text("""
             UPDATE knowledge_chunks
-            SET is_deleted = True, embedding = NULL, updated_at = NOW()
+            SET is_deleted = True, embedding = NULL, content = '', updated_at = NOW()
             WHERE kb_id IN (
                 WITH RECURSIVE subtree AS (
                     SELECT kb_id FROM knowledge_base_hierarchy WHERE kb_id = :root_id

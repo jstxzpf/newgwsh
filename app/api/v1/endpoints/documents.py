@@ -204,13 +204,21 @@ async def submit_document(
     except ValueError as e:
         return error(code=409, message=str(e))
     
-    # 3. 记录审计
-    audit = WorkflowAudit(
-        doc_id=doc.doc_id,
-        workflow_node_id=30,
-        operator_id=current_user.user_id
-    )
-    db.add(audit)
+    import asyncio
+    from app.core.database import AsyncSessionLocal
+    
+    # 异步写入审计日志 (实施约束规则 5)
+    async def write_audit_log_async(doc_id: str, node_id: int, operator_id: int):
+        async with AsyncSessionLocal() as audit_db:
+            audit = WorkflowAudit(
+                doc_id=doc_id,
+                workflow_node_id=node_id,
+                operator_id=operator_id
+            )
+            audit_db.add(audit)
+            await audit_db.commit()
+
+    asyncio.create_task(write_audit_log_async(doc.doc_id, 30, current_user.user_id))
     
     # 4. 记录到审批日志表 (待审状态, 包含 submitted_at)
     from datetime import datetime, timezone

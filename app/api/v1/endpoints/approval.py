@@ -61,18 +61,30 @@ async def review_document(
         else:
             doc.status = DocStatus.REJECTED
         
-        # 5. 记录审计日志 (WorkflowNode: 40=APPROVED, 41=REJECTED)
-        audit_node = 40 if review_in.action == ApprovalAction.APPROVE else 41
-        audit = WorkflowAudit(
-            doc_id=doc.doc_id,
-            workflow_node_id=audit_node,
-            operator_id=current_user.user_id,
-            action_details={"comments": review_in.comments}
-        )
-        db.add(audit)
-    
     # 6. 触发异步排版任务 (FORMAT) 和 SSE 通知
     from app.core.sse_utils import publish_user_event
+    import asyncio
+    from app.core.database import AsyncSessionLocal
+    
+    # 异步写入审计日志 (实施约束规则 5 推荐方案 B)
+    async def write_audit_log_async(doc_id: str, node_id: int, operator_id: int, details: dict):
+        async with AsyncSessionLocal() as audit_db:
+            audit = WorkflowAudit(
+                doc_id=doc_id,
+                workflow_node_id=node_id,
+                operator_id=operator_id,
+                action_details=details
+            )
+            audit_db.add(audit)
+            await audit_db.commit()
+
+    audit_node = 40 if review_in.action == ApprovalAction.APPROVE else 41
+    asyncio.create_task(write_audit_log_async(
+        doc.doc_id, 
+        audit_node, 
+        current_user.user_id, 
+        {"comments": review_in.comments}
+    ))
     
     if review_in.action == ApprovalAction.APPROVE:
         from app.tasks.worker import format_document
