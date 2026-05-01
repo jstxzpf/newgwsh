@@ -46,6 +46,7 @@ const KnowledgeBase: React.FC = () => {
 
   return (
     <div style={{ padding: 24 }}>
+      <h1 style={{ marginBottom: 24 }}>知识库管理</h1>
       <Card>
         <Tabs
           activeKey={activeTab}

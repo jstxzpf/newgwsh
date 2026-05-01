@@ -47,7 +47,10 @@ const Chat: React.FC = () => {
             dataSource={messages}
             renderItem={(item) => (
               <List.Item style={{ borderBottom: 'none', justifyContent: item.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                <div style={{ display: 'flex', flexDirection: item.role === 'user' ? 'row-reverse' : 'row', gap: 12, maxWidth: '80%' }}>
+                <div 
+                  className={item.role === 'user' ? 'chat-message-user' : 'chat-message-ai'}
+                  style={{ display: 'flex', flexDirection: item.role === 'user' ? 'row-reverse' : 'row', gap: 12, maxWidth: '80%' }}
+                >
                   <Avatar icon={item.role === 'user' ? <UserOutlined /> : <RobotOutlined />} style={{ background: item.role === 'user' ? '#1890ff' : '#003366' }} />
                   <div style={{
                     background: item.role === 'user' ? '#1890ff' : '#fff',

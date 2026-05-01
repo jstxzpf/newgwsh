@@ -35,8 +35,8 @@ const MainLayout: React.FC = () => {
   const menuItems = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: '个人工作台' },
     { key: '/documents', icon: <FileTextOutlined />, label: '公文中心' },
-    { key: '/knowledge', icon: <DatabaseOutlined />, label: '知识资产库' },
-    { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
+    { key: '/knowledge', icon: <DatabaseOutlined />, label: '知识库' },
+    { key: '/chat', icon: <MessageOutlined />, label: '智能助手' },
     { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务中心' },
     { key: '/approvals', icon: <CheckCircleOutlined />, label: '签批管控台' },
     { key: '/settings', icon: <SettingOutlined />, label: '系统中枢' },
