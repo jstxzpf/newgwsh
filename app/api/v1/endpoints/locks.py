@@ -49,6 +49,7 @@ class ReleaseRequest(BaseModel):
     doc_id: str
     lock_token: str
     content: Optional[str] = None
+    draft_content: Optional[str] = None
 
 @router.post("/release", response_model=StandardResponse)
 async def release_lock(
@@ -58,13 +59,16 @@ async def release_lock(
 ) -> Any:
     """释放锁 (支持 beforeunload 合并保存 P7.2)"""
     # 1. 如果包含内容，先执行保存 (原子合并防止竞态)
-    if req.content is not None:
+    if req.content is not None or req.draft_content is not None:
         from app.models.document import Document
         doc = await db.get(Document, req.doc_id)
         if doc and not doc.is_deleted:
             # 校验锁归属后才允许保存
             if await lock_manager.verify_lock(req.doc_id, req.lock_token):
-                doc.content = req.content
+                if req.content is not None:
+                    doc.content = req.content
+                if req.draft_content is not None:
+                    doc.draft_suggestion = req.draft_content
                 await db.commit()
 
     # 2. 释放锁 (内部校验 token)
