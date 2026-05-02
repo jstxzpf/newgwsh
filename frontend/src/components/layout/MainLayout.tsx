@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Menu, Button, Avatar, Dropdown, Badge, Drawer } from 'antd';
+import { Layout, Menu, Button, Avatar, Dropdown, Badge, Drawer, List, Tag, Space, Typography } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   DashboardOutlined,
@@ -15,6 +15,9 @@ import {
   MenuFoldOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
+import { useNotificationStore } from '../../stores/notificationStore';
+import { useNotificationWatcher } from '../../hooks/useNotificationWatcher';
+import { notificationService } from '../../api/services';
 import AntiLeakWatermark from '../common/AntiLeakWatermark';
 import GlobalTaskWatcher from '../common/GlobalTaskWatcher';
 
@@ -24,12 +27,35 @@ const MainLayout: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const { userInfo, clearAuth } = useAuthStore();
+  const { unreadCount, notifications, setNotifications, markAsRead } = useNotificationStore();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Initialize real-time notification watcher
+  useNotificationWatcher();
 
   const handleLogout = () => {
     clearAuth();
     navigate('/login');
+  };
+
+  const handleOpenNotifications = async () => {
+    setNotificationOpen(true);
+    try {
+      const res = await notificationService.getList({ page_size: 50 });
+      setNotifications(res.items);
+    } catch (err) {
+      console.error('Failed to load notifications');
+    }
+  };
+
+  const handleRead = async (id: number) => {
+    try {
+      await notificationService.markAsRead(id);
+      markAsRead(id);
+    } catch (err) {
+      console.error('Failed to mark notification as read');
+    }
   };
 
   const menuItems = [
@@ -74,8 +100,8 @@ const MainLayout: React.FC = () => {
             style={{ fontSize: '16px', width: 64, height: 64 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-            <Badge count={5} size="small">
-              <Button type="text" icon={<BellOutlined />} onClick={() => setNotificationOpen(true)} />
+            <Badge count={unreadCount} size="small" overflowCount={99}>
+              <Button type="text" icon={<BellOutlined />} onClick={handleOpenNotifications} />
             </Badge>
             <Dropdown menu={userMenu}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
@@ -98,8 +124,30 @@ const MainLayout: React.FC = () => {
         placement="right"
         onClose={() => setNotificationOpen(false)}
         open={notificationOpen}
+        width={350}
       >
-        <p>暂无新通知</p>
+        <List
+          dataSource={notifications}
+          renderItem={(item) => (
+            <List.Item 
+              actions={[
+                !item.is_read && <Button type="link" size="small" onClick={() => handleRead(item.notification_id)}>标记已读</Button>
+              ]}
+              style={{ opacity: item.is_read ? 0.6 : 1 }}
+            >
+              <List.Item.Meta
+                title={<Tag color={item.type === 'TASK_COMPLETED' ? 'success' : 'blue'}>{item.type}</Tag>}
+                description={
+                  <div>
+                    <div style={{ color: '#333', marginBottom: 4 }}>{item.content}</div>
+                    <div style={{ fontSize: 12, color: '#999' }}>{new Date(item.created_at).toLocaleString()}</div>
+                  </div>
+                }
+              />
+            </List.Item>
+          )}
+          locale={{ emptyText: '暂无新通知' }}
+        />
       </Drawer>
     </Layout>
   );

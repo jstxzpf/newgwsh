@@ -3,6 +3,7 @@ import { Card, Form, Input, Button, message, Layout } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import { authService } from '../api/services';
 
 const { Content } = Layout;
 
@@ -14,24 +15,27 @@ const Login: React.FC = () => {
   const onFinish = async (values: any) => {
     setLoading(true);
     try {
-      // Mock login for now
-      if (values.username === 'admin' && values.password === '123456') {
-        const mockUser = {
-          user_id: 1,
-          username: 'admin',
-          full_name: '系统管理员',
-          role_level: 99,
-          dept_id: 1,
-          department_name: '办公室',
-        };
-        setAuth('mock-token', mockUser);
-        message.success('登录成功');
-        navigate('/dashboard');
-      } else {
-        message.error('用户名或密码错误');
-      }
-    } catch (error) {
-      message.error('登录失败');
+      // 1. 调用真实登录接口
+      const loginRes = await authService.login({
+        username: values.username,
+        password: values.password
+      });
+      const access_token = loginRes.access_token;
+      
+      // 2. 更新全局状态 (先只设置 token，以便 me() 接口能带上 token)
+      setAuth(access_token, null as any);
+      
+      // 3. 获取当前用户信息
+      const user = await authService.me();
+      
+      // 4. 补全用户信息
+      setAuth(access_token, user);
+      
+      message.success('登录成功');
+      navigate('/dashboard');
+    } catch (error: any) {
+      console.error('Login failed:', error);
+      message.error(error.message || '登录失败，请检查网络或凭据');
     } finally {
       setLoading(false);
     }

@@ -20,6 +20,7 @@ class UserUpdate(BaseModel):
 
 class User(UserBase):
     user_id: int
+    department_name: Optional[str] = None
 
     class Config:
         from_attributes = True

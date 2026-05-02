@@ -6,6 +6,7 @@ from app.api import deps
 from app.models.org import SystemUser
 from app.models.audit import UserNotification
 from app.schemas.response import StandardResponse, success, error
+from app.schemas.notification import NotificationOut
 
 router = APIRouter()
 
@@ -17,7 +18,7 @@ async def list_notifications(
     db: AsyncSession = Depends(deps.get_async_db),
     current_user: SystemUser = Depends(deps.get_current_user)
 ) -> Any:
-    """获取通知列表 (P11)"""
+    """获取通知列表 (P11)徒"""
     stmt = select(UserNotification).where(UserNotification.user_id == current_user.user_id)
     if is_read is not None:
         stmt = stmt.where(UserNotification.is_read == is_read)
@@ -27,7 +28,9 @@ async def list_notifications(
     
     result = await db.execute(stmt)
     items = result.scalars().all()
-    return success(data={"items": items, "total": len(items)})
+    # Explicitly convert to Pydantic models for serialization stability
+    data_items = [NotificationOut.model_validate(item).model_dump() for item in items]
+    return success(data={"items": data_items, "total": len(data_items)})
 
 @router.get("/unread-count", response_model=StandardResponse)
 async def get_unread_count(

@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { notification, Button, Badge } from 'antd';
+import React, { useEffect, useRef } from 'react';
+import { notification, Button } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useTaskStore } from '../../stores/taskStore';
-import { taskService } from '../../api/services';
+import { useEditorStore } from '../../stores/editorStore';
+import { taskService, documentService } from '../../api/services';
 
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_WINDOW_MS = 30000;
@@ -11,9 +12,10 @@ const MAX_CONCURRENT_SSE = 5;
 
 const GlobalTaskWatcher: React.FC = () => {
   const { activeTaskIds, removeTask } = useTaskStore();
+  const { setAiPolishedContent, setViewMode, setBusy, currentDocId } = useEditorStore();
   const eventSources = useRef<Record<string, EventSource>>({});
   const retryCounts = useRef<Record<string, { count: number; firstAttempt: number }>>({});
-  const pollingIntervals = useRef<Record<string, NodeJS.Timeout>>({});
+  const pollingIntervals = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -68,6 +70,13 @@ const GlobalTaskWatcher: React.FC = () => {
       es.addEventListener('task.completed', (e: any) => {
         const data = JSON.parse(e.data);
         showSuccessNotification(data);
+        if (data.doc_id === currentDocId) {
+          documentService.getDetail(data.doc_id).then(res => {
+            setAiPolishedContent(res.ai_polished_content || res.draft_suggestion || null);
+            setViewMode('DIFF');
+            setBusy(false);
+          });
+        }
         cleanupTask(taskId);
       });
 

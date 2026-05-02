@@ -17,7 +17,10 @@ async def list_doc_types(
     """文种管理: 列表查询"""
     stmt = select(DocumentType)
     result = await db.execute(stmt)
-    return success(data=result.scalars().all())
+    items = result.scalars().all()
+    from app.schemas.org import DocumentTypeOut
+    data_items = [DocumentTypeOut.model_validate(item).model_dump() for item in items]
+    return success(data={"items": data_items, "total": len(data_items)})
 
 @router.post("/", response_model=StandardResponse)
 async def create_doc_type(

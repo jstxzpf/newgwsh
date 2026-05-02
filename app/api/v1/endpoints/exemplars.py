@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.api import deps
 from app.models.org import SystemUser
-from app.models.config import DocumentType, ExemplarDocument
+from app.models.config import DocumentType
+from app.models.document import ExemplarDocument
 from app.schemas.response import StandardResponse, success, error
 from app.core.config import settings
 

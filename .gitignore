@@ -28,6 +28,9 @@ htmlcov/
 venv/
 ENV/
 env/
+.agents/
+.md/
+.gemini/
 celerybeat-schedule
 celerybeat.pid
 

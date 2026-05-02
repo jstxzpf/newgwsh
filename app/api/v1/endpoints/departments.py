@@ -16,7 +16,10 @@ async def list_departments(
     """科室管理: 列表查询"""
     stmt = select(Department)
     result = await db.execute(stmt)
-    return success(data=result.scalars().all())
+    items = result.scalars().all()
+    from app.schemas.org import DepartmentOut
+    data_items = [DepartmentOut.model_validate(item).model_dump() for item in items]
+    return success(data={"items": data_items, "total": len(data_items)})
 
 @router.post("/", response_model=StandardResponse)
 async def create_department(

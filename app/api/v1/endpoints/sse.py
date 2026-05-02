@@ -8,26 +8,30 @@ from app.core.locks import lock_manager
 from app.models.org import SystemUser
 from app.schemas.response import StandardResponse, success, error
 
+from fastapi import APIRouter, Depends, HTTPException, Request, Body
+
 router = APIRouter()
 
 @router.post("/ticket", response_model=StandardResponse)
 async def get_sse_ticket(
-    task_id: Optional[str] = None, # 任务级 SSE 需要 task_id
+    task_id: Optional[str] = Body(None, embed=True), # 任务级 SSE 需要 task_id, 符合契约 Body 传参
     current_user: SystemUser = Depends(deps.get_current_user)
 ) -> Any:
     """
     申请 SSE 票据 (阅后即焚 P4.1)
     设计要求: 绑定 task_id (可选) 与 user_id, 15秒 TTL
     """
-    import uuid
-    ticket_uuid = str(uuid.uuid4())
-    ticket_key = f"sse_ticket:{ticket_uuid}"
-    
     # 验证任务所有权 (如果是任务级 SSE)
     if task_id:
         task_owner = await lock_manager.redis.get(f"task_owner:{task_id}")
-        if task_owner and task_owner != str(current_user.user_id):
-            return error(code=403, message="Not authorized for this task")
+        if not task_owner:
+            raise HTTPException(status_code=404, detail="Task not found or expired")
+        if task_owner != str(current_user.user_id):
+            raise HTTPException(status_code=403, detail="Not authorized for this task")
+
+    import uuid
+    ticket_uuid = str(uuid.uuid4())
+    ticket_key = f"sse_ticket:{ticket_uuid}"
 
     ticket_data = {
         "user_id": current_user.user_id,
@@ -70,7 +74,7 @@ async def sse_events(
                 if await request.is_disconnected():
                     break
                 
-                message = await pubsub.get_message(ignore_subscribe_crashes=True, timeout=1.0)
+                message = await pubsub.get_message(timeout=1.0)
                 if message and message['type'] == 'message':
                     yield {
                         "data": message['data']
@@ -114,7 +118,7 @@ async def user_global_events(
                 if await request.is_disconnected():
                     break
                 
-                message = await pubsub.get_message(ignore_subscribe_crashes=True, timeout=1.0)
+                message = await pubsub.get_message(timeout=1.0)
                 if message and message['type'] == 'message':
                     # 数据格式通常为 {"event": "xxx", "data": {...}}
                     data = json.loads(message['data'])

@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 import time
 import json
 import subprocess
@@ -14,7 +15,7 @@ from app.core.config import settings
 from app.core.locks import lock_manager
 
 def publish_event(task_id: str, event_type: str, data: dict):
-    """向 Redis Pub/Sub 发送事件"""
+    """向 Redis Pub/Sub 发送事件并同步数据库状态"""
     import redis
     r = redis.from_url(settings.REDIS_URL)
     payload = {
@@ -22,6 +23,35 @@ def publish_event(task_id: str, event_type: str, data: dict):
         "data": data
     }
     r.publish(f"task_channel:{task_id}", json.dumps(payload))
+    
+    # 同步状态到数据库 (支持轮询补偿机制)
+    if task_id:
+        try:
+            from app.models.task import AsyncTask, TaskStatus
+            with SyncSessionLocal() as session:
+                task = session.get(AsyncTask, task_id)
+                if task:
+                    now = datetime.now(timezone.utc)
+                    if event_type == "task.progress":
+                        if task.task_status == TaskStatus.QUEUED:
+                            task.task_status = TaskStatus.PROCESSING
+                            task.started_at = now
+                        task.progress_pct = data.get("progress_pct", task.progress_pct)
+                    elif event_type == "task.completed":
+                        task.task_status = TaskStatus.COMPLETED
+                        task.progress_pct = 100
+                        task.completed_at = now
+                        if "file_path" in data:
+                            task.result_summary = data["file_path"]
+                        elif "has_content" in data:
+                            task.result_summary = "AI 润色成功"
+                    elif event_type == "task.failed":
+                        task.task_status = TaskStatus.FAILED
+                        task.error_message = data.get("error", "Unknown error")
+                        task.completed_at = now
+                    session.commit()
+        except Exception as e:
+            print(f"Failed to update task status in DB: {e}")
 
 @shared_task(name="app.tasks.worker.parse_knowledge")
 def parse_knowledge(kb_id: int, task_id: str = None):
@@ -141,6 +171,7 @@ def polish_document(self, doc_id: str, context_kb_ids: list, exemplar_id: int = 
 
     # 4. 调用 LLM
     try:
+        print(f"Calling LLM for document {doc_id} with content length {len(content_to_polish)}")
         polished_text = ai_service.chat_completion(
             "system_polish", 
             content_to_polish, 
@@ -148,6 +179,7 @@ def polish_document(self, doc_id: str, context_kb_ids: list, exemplar_id: int = 
             exemplar_text=exemplar_text,
             doc_type_name=doc_type_name
         )
+        print(f"LLM returned text of length {len(polished_text) if polished_text else 0}")
         
         publish_event(task_id, "task.progress", {"progress_pct": 90})
         
@@ -158,9 +190,12 @@ def polish_document(self, doc_id: str, context_kb_ids: list, exemplar_id: int = 
             ).scalar_one_or_none()
             
             if doc_locked and doc_locked.status == DocStatus.DRAFTING:
-                doc_locked.ai_polished_content = polished_text
-                session.commit()
-                publish_event(task_id, "task.completed", {"doc_id": doc_id})
+                if polished_text and polished_text.strip():
+                    doc_locked.ai_polished_content = polished_text
+                    session.commit()
+                    publish_event(task_id, "task.completed", {"doc_id": doc_id, "has_content": True})
+                else:
+                    publish_event(task_id, "task.failed", {"error": "AI returned empty content"})
                 return "Polishing completed"
             else:
                 current_status = doc_locked.status.name if doc_locked else "DELETED"

@@ -16,7 +16,7 @@ class AIService:
         """调用 Ollama 获取向量 (Embeddings)"""
         url = f"{settings.OLLAMA_BASE_URL}/api/embeddings"
         payload = {
-            "model": "nomic-embed-text", 
+            "model": settings.OLLAMA_EMBEDDING_MODEL, 
             "prompt": text
         }
         try:

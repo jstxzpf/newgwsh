@@ -1,11 +1,12 @@
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.api import deps
 from app.models.org import SystemUser
 from app.models.document import Document, DocStatus
 from app.models.task import AsyncTask, TaskType, TaskStatus
+from app.schemas.task import AsyncTaskRead
 from app.schemas.response import StandardResponse, success, error
 from app.tasks.worker import polish_document, format_document
 from app.core.locks import lock_manager
@@ -14,7 +15,7 @@ router = APIRouter()
 
 @router.post("/format", response_model=StandardResponse)
 async def trigger_format(
-    doc_id: str,
+    doc_id: str = Body(..., embed=True),
     db: AsyncSession = Depends(deps.get_async_db),
     current_user: SystemUser = Depends(deps.get_current_active_user)
 ) -> Any:
@@ -75,35 +76,35 @@ async def retry_task(
     else:
         return error(code=400, message="Unknown task type")
 
-    # 更新旧记录或创建新记录? 契约说返回 task_id，通常派发新任务
+    # 更新旧记录或创建新记录
     await lock_manager.redis.set(f"task_owner:{new_task.id}", str(current_user.user_id), ex=3600)
     
     # 增加重试计数并标记为 QUEUED
     task_record.retry_count += 1
     task_record.task_status = TaskStatus.QUEUED
-    task_record.task_id = new_task.id # 更新 ID 以匹配新任务
+    task_record.task_id = new_task.id 
     await db.commit()
 
     return success(data={"task_id": new_task.id})
 
 @router.post("/polish", response_model=StandardResponse)
 async def trigger_polish(
-    doc_id: str,
-    lock_token: str,
-    context_kb_ids: List[int] = [],
-    context_snapshot_version: Optional[int] = None,
-    exemplar_id: Optional[int] = None,
+    doc_id: str = Body(...),
+    lock_token: str = Body(...),
+    context_kb_ids: List[int] = Body([]),
+    context_snapshot_version: Optional[int] = Body(None),
+    exemplar_id: Optional[int] = Body(None),
     db: AsyncSession = Depends(deps.get_async_db),
     current_user: SystemUser = Depends(deps.get_current_active_user)
 ) -> Any:
     """触发 AI 润色任务 (P4.1, 实施约束规则 1)"""
     
-    # 1. 锁校验 (实施约束规则 1: 锁持有者权限)
+    # 1. 锁校验
     is_locked = await lock_manager.verify_lock(doc_id, lock_token)
     if not is_locked:
         return error(code=423, message="Valid lock_token required to trigger polish")
     
-    # 2. 状态校验 (实施约束规则 3)
+    # 2. 状态校验
     doc = await db.get(Document, doc_id)
     if not doc or doc.status != DocStatus.DRAFTING:
         return error(code=409, message="Document must be in DRAFTING status")
@@ -111,7 +112,7 @@ async def trigger_polish(
     # 3. 派发 Celery 任务
     task = polish_document.delay(doc_id, context_kb_ids, exemplar_id)
     
-    # 4. 存储任务归属到 Redis (用于 SSE 鉴权 P4.1)
+    # 4. 存储任务归属到 Redis
     await lock_manager.redis.set(f"task_owner:{task.id}", str(current_user.user_id), ex=3600)
     
     # 5. 持久化记录
@@ -132,13 +133,27 @@ async def trigger_polish(
     
     return success(data={"task_id": task.id})
 
-@router.get("/{task_id}", response_model=StandardResponse)
+@router.get("/", response_model=StandardResponse[List[AsyncTaskRead]])
+async def list_my_tasks(
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(deps.get_async_db),
+    current_user: SystemUser = Depends(deps.get_current_user)
+) -> Any:
+    """获取我的任务列表"""
+    stmt = select(AsyncTask).where(AsyncTask.creator_id == current_user.user_id)
+    stmt = stmt.order_by(AsyncTask.created_at.desc())
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(stmt)
+    return success(data=result.scalars().all())
+
+@router.get("/{task_id}", response_model=StandardResponse[AsyncTaskRead])
 async def get_task_status(
     task_id: str,
     db: AsyncSession = Depends(deps.get_async_db),
     current_user: SystemUser = Depends(deps.get_current_user)
 ) -> Any:
-    """查询任务状态 (P4.3)"""
+    """查询任务状态"""
     stmt = select(AsyncTask).where(AsyncTask.task_id == task_id)
     result = await db.execute(stmt)
     task = result.scalar_one_or_none()

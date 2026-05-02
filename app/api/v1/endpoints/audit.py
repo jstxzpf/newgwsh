@@ -42,4 +42,20 @@ async def list_audit_logs(
     stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     
     result = await db.execute(stmt)
-    return success(data={"items": result.scalars().all(), "total": 0}) # total 简化
+    items = result.scalars().all()
+    
+    # [P0] harden: 显式进行 Pydantic 序列化以避免 500 错误
+    from pydantic import ConfigDict, BaseModel
+    from datetime import datetime
+    
+    class AuditOut(BaseModel):
+        audit_id: int
+        doc_id: Optional[str]
+        workflow_node_id: int
+        operator_id: int
+        action_timestamp: datetime
+        action_details: Optional[dict]
+        model_config = ConfigDict(from_attributes=True)
+
+    data_items = [AuditOut.model_validate(item).model_dump() for item in items]
+    return success(data={"items": data_items, "total": len(data_items)})

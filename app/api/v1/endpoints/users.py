@@ -20,7 +20,10 @@ async def list_users(
     if dept_id:
         stmt = stmt.where(SystemUser.dept_id == dept_id)
     result = await db.execute(stmt)
-    return success(data=result.scalars().all())
+    items = result.scalars().all()
+    from app.schemas.user import User as UserRead
+    data_items = [UserRead.model_validate(item).model_dump() for item in items]
+    return success(data={"items": data_items, "total": len(data_items)})
 
 @router.post("/", response_model=StandardResponse)
 async def create_user(

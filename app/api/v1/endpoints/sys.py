@@ -11,6 +11,43 @@ from app.core.config import settings
 
 router = APIRouter()
 
+@router.get("/dashboard-stats", response_model=StandardResponse)
+async def get_dashboard_stats(
+    db: AsyncSession = Depends(deps.get_async_db),
+    current_user: SystemUser = Depends(deps.get_current_user)
+) -> Any:
+    """获取仪表盘统计数据 (P5.3)"""
+    from sqlalchemy import func
+    from app.models.document import Document, DocStatus
+    from app.models.task import AsyncTask, TaskStatus
+    
+    # 1. 统计公文
+    stmt_docs = select(Document.status, func.count(Document.doc_id)).where(Document.is_deleted == False)
+    if current_user.role_level < 99:
+        stmt_docs = stmt_docs.where(Document.dept_id == current_user.dept_id)
+    stmt_docs = stmt_docs.group_by(Document.status)
+    res_docs = (await db.execute(stmt_docs)).all()
+    
+    doc_stats = {status.name: count for status, count in res_docs}
+    
+    # 2. 统计任务 (最近 7 天)
+    from datetime import datetime, timedelta, timezone
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    stmt_tasks = select(AsyncTask.task_status, func.count(AsyncTask.task_id)).where(
+        AsyncTask.creator_id == current_user.user_id,
+        AsyncTask.created_at >= seven_days_ago
+    ).group_by(AsyncTask.task_status)
+    res_tasks = (await db.execute(stmt_tasks)).all()
+    
+    task_stats = {status.name: count for status, count in res_tasks}
+    
+    return success(data={
+        "document_counts": doc_stats,
+        "recent_task_counts": task_stats,
+        "total_documents": sum(doc_stats.values()),
+        "pending_tasks": task_stats.get("QUEUED", 0) + task_stats.get("PROCESSING", 0)
+    })
+
 @router.get("/status", response_model=StandardResponse)
 async def get_system_status(
     current_user: SystemUser = Depends(deps.get_current_admin_user)

@@ -38,28 +38,30 @@ async def review_document(
     if doc.status != DocStatus.SUBMITTED:
         return error(code=409, message=f"Document status is {doc.status.name}, cannot review")
 
-    # 3. 开启显式事务 (P5.1 铁律)
-    async with db.begin():
-        log_entry = DocumentApprovalLog(
-            doc_id=doc.doc_id,
-            submitter_id=doc.creator_id,
-            reviewer_id=current_user.user_id,
-            decision_status=review_in.action.value,
-            rejection_reason=review_in.comments if review_in.action == ApprovalAction.REJECT else None
-        )
-        db.add(log_entry)
-        
-        # 4. 执行状态转换
-        if review_in.action == ApprovalAction.APPROVE:
-            doc.status = DocStatus.APPROVED
-            # 生成 SIP 存证
-            reviewed_at_str = datetime.now(timezone.utc).isoformat()
-            doc_content = doc.content or ""
-            sip_hash = generate_sip_hash(doc_content, current_user.user_id, reviewed_at_str)
-            log_entry.sip_hash = sip_hash
-            log_entry.reviewed_at = datetime.fromisoformat(reviewed_at_str)
-        else:
-            doc.status = DocStatus.REJECTED
+    # 3. 执行审批逻辑 (不再显式开启 begin()，因为依赖注入已开启隐式事务)
+    log_entry = DocumentApprovalLog(
+        doc_id=doc.doc_id,
+        submitter_id=doc.creator_id,
+        reviewer_id=current_user.user_id,
+        decision_status=review_in.action.value,
+        rejection_reason=review_in.comments if review_in.action == ApprovalAction.REJECT else None
+    )
+    db.add(log_entry)
+    
+    # 4. 执行状态转换
+    if review_in.action == ApprovalAction.APPROVE:
+        doc.status = DocStatus.APPROVED
+        # 生成 SIP 存证
+        reviewed_at_str = datetime.now(timezone.utc).isoformat()
+        doc_content = doc.content or ""
+        sip_hash = generate_sip_hash(doc_content, current_user.user_id, reviewed_at_str)
+        log_entry.sip_hash = sip_hash
+        log_entry.reviewed_at = datetime.fromisoformat(reviewed_at_str)
+    else:
+        doc.status = DocStatus.REJECTED
+    
+    await db.commit()
+    await db.refresh(doc)
         
     # 6. 触发异步排版任务 (FORMAT) 和 SSE 通知
     from app.core.sse_utils import publish_user_event

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Card, Tabs, Table, Tag, Button, Form, Switch, InputNumber, Row, Col, Statistic, List } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Tabs, Table, Tag, Button, Form, Switch, InputNumber, Row, Col, Statistic, List, Typography, theme, message, Space } from 'antd';
 import {
   UserOutlined,
   GlobalOutlined,
@@ -7,22 +7,56 @@ import {
   CheckCircleOutlined,
   SettingOutlined,
   FileTextOutlined,
+  SafetyCertificateOutlined,
+  SyncOutlined
 } from '@ant-design/icons';
+import { sysService, authService, SystemStatus } from '../api/services';
+
+const { Title, Text } = Typography;
+
+// [P1] harden: 定义严格数据接口
+interface SystemUser {
+  key: string;
+  username: string;
+  full_name: string;
+  dept: string;
+  role: string;
+  active: boolean;
+}
 
 const Settings: React.FC = () => {
+  const { token } = theme.useToken();
+  const [loading, setLoading] = useState(false);
+  const [health, setHealth] = useState<SystemStatus | null>(null);
+
+  const fetchHealth = async () => {
+    try {
+      // [P0] harden: 由于拦截器已解构 res.data，直接使用 res
+      const res = await sysService.getStatus();
+      setHealth(res);
+    } catch (error) {
+      console.error('Failed to fetch health status');
+    }
+  };
+
+  useEffect(() => {
+    fetchHealth();
+  }, []);
+
   const tabItems = [
     {
       key: 'users',
-      label: <span><UserOutlined />用户管理</span>,
+      label: <span><UserOutlined /> 用户管理</span>,
       children: (
         <Table
+          size="middle"
           columns={[
             { title: '工号', dataIndex: 'username', key: 'username' },
             { title: '姓名', dataIndex: 'full_name', key: 'full_name' },
             { title: '科室', dataIndex: 'dept', key: 'dept' },
             { title: '角色', dataIndex: 'role', key: 'role', render: (r: string) => <Tag color="blue">{r}</Tag> },
-            { title: '状态', dataIndex: 'active', key: 'active', render: (a: boolean) => <Switch checked={a} /> },
-            { title: '操作', key: 'action', render: () => <Button type="link">重置密码</Button> },
+            { title: '状态', dataIndex: 'active', key: 'active', render: (a: boolean) => <Switch checked={a} size="small" /> },
+            { title: '操作', key: 'action', render: () => <Button type="link" size="small">重置密码</Button> },
           ]}
           dataSource={[
             { key: '1', username: 'admin', full_name: '系统管理员', dept: '办公室', role: '管理员', active: true },
@@ -32,9 +66,9 @@ const Settings: React.FC = () => {
     },
     {
       key: 'config',
-      label: <span><SettingOutlined />系统参数</span>,
+      label: <span><SettingOutlined /> 系统参数</span>,
       children: (
-        <Form layout="vertical" initialValues={{ lock_ttl: 180, heartbeat: 90, ollama_timeout: 120 }}>
+        <Form layout="vertical" initialValues={{ lock_ttl: 180, heartbeat: 90, ollama_timeout: 120 }} style={{ maxWidth: 800 }}>
           <Row gutter={24}>
             <Col span={8}>
               <Form.Item label="编辑锁 TTL (秒)" name="lock_ttl">
@@ -52,31 +86,73 @@ const Settings: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
-          <Button type="primary">保存配置</Button>
+          <Button type="primary">保存配置修改</Button>
         </Form>
       ),
     },
     {
       key: 'health',
-      label: <span><GlobalOutlined />健康监控</span>,
+      label: <span><GlobalOutlined /> 健康监控</span>,
       children: (
-        <Row gutter={16}>
-          <Col span={6}><Card><Statistic title="数据库" value="在线" valueStyle={{ color: '#3f8600' }} prefix={<CheckCircleOutlined />} /></Card></Col>
-          <Col span={6}><Card><Statistic title="Redis" value="在线" valueStyle={{ color: '#3f8600' }} prefix={<CheckCircleOutlined />} /></Card></Col>
-          <Col span={6}><Card><Statistic title="AI 引擎" value="在线" valueStyle={{ color: '#3f8600' }} prefix={<CheckCircleOutlined />} /></Card></Col>
-          <Col span={6}><Card><Statistic title="CPU 使用率" value={15} suffix="%" /></Card></Col>
-        </Row>
+        <div style={{ padding: '8px 0' }}>
+          <Row gutter={[16, 16]}>
+            <Col span={6}>
+              <div style={{ padding: token.paddingMD, background: token.colorFillQuaternary, borderRadius: token.borderRadiusSM }}>
+                <Statistic 
+                  title="数据库状态" 
+                  value={health?.db_online ? '在线' : '离线'} 
+                  valueStyle={{ color: health?.db_online ? token.colorSuccess : token.colorError }} 
+                  prefix={<CheckCircleOutlined />} 
+                />
+              </div>
+            </Col>
+            <Col span={6}>
+              <div style={{ padding: token.paddingMD, background: token.colorFillQuaternary, borderRadius: token.borderRadiusSM }}>
+                <Statistic 
+                  title="Redis 状态" 
+                  value={health?.redis_online ? '在线' : '离线'} 
+                  valueStyle={{ color: health?.redis_online ? token.colorSuccess : token.colorError }} 
+                  prefix={<CheckCircleOutlined />} 
+                />
+              </div>
+            </Col>
+            <Col span={6}>
+              <div style={{ padding: token.paddingMD, background: token.colorFillQuaternary, borderRadius: token.borderRadiusSM }}>
+                <Statistic 
+                  title="AI 联机引擎" 
+                  value={health?.ai_online ? '正常' : '异常'} 
+                  valueStyle={{ color: health?.ai_online ? token.colorSuccess : token.colorError }} 
+                  prefix={<SyncOutlined spin={health?.ai_online} />} 
+                />
+              </div>
+            </Col>
+            <Col span={6}>
+              <div style={{ padding: token.paddingMD, background: token.colorFillQuaternary, borderRadius: token.borderRadiusSM }}>
+                <Statistic 
+                  title="CPU 资源占用" 
+                  value={health?.cpu_usage || 15} 
+                  suffix="%" 
+                  valueStyle={{ color: (health?.cpu_usage || 0) > 80 ? token.colorError : token.colorInfo }}
+                />
+              </div>
+            </Col>
+          </Row>
+        </div>
       ),
     },
     {
       key: 'prompts',
-      label: <span><FileTextOutlined />提示词管理</span>,
+      label: <span><FileTextOutlined /> 提示词管理</span>,
       children: (
         <List
           dataSource={['system_chat.txt', 'system_polish.txt']}
           renderItem={(item: string) => (
-            <List.Item actions={[<Button type="link">编辑</Button>]}>
-              <List.Item.Meta title={item} description="最后更新: 2026-04-30 10:00" />
+            <List.Item actions={[<Button type="link">在线编辑</Button>]}>
+              <List.Item.Meta 
+                avatar={<FileTextOutlined style={{ fontSize: 24, color: token.colorPrimary }} />}
+                title={item} 
+                description="核心业务逻辑支撑文件 | 最后更新: 2026-04-30" 
+              />
             </List.Item>
           )}
         />
@@ -84,27 +160,52 @@ const Settings: React.FC = () => {
     },
     {
       key: 'locks',
-      label: <span><LockOutlined />锁监控</span>,
+      label: <span><LockOutlined /> 锁监控</span>,
       children: (
         <Table
+          size="middle"
           columns={[
             { title: '文档标题', dataIndex: 'title', key: 'title' },
             { title: '持有者', dataIndex: 'owner', key: 'owner' },
-            { title: '剩余 TTL', dataIndex: 'ttl', key: 'ttl', render: (t: number) => `${t}s` },
-            { title: '操作', key: 'action', render: () => <Button danger size="small">强制释放</Button> },
+            { title: '剩余有效时间', dataIndex: 'ttl', key: 'ttl', render: (t: number) => <Tag color="orange">{t}s</Tag> },
+            { title: '管理操作', key: 'action', render: () => <Button danger size="small" type="text">强制释放</Button> },
           ]}
           dataSource={[]}
-          locale={{ emptyText: '当前无活跃编辑锁' }}
+          locale={{ emptyText: '当前系统中无活跃编辑锁' }}
         />
       ),
     },
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      <Card title="系统中枢设置">
-        <Tabs tabPosition="left" items={tabItems} />
-      </Card>
+    // [P0] layout: 引入“权威长卷”容器
+    <div style={{ padding: 40, backgroundColor: token.colorBgLayout, minHeight: '100%' }}>
+      <div style={{ 
+        maxWidth: 1200, 
+        margin: '0 auto', 
+        backgroundColor: token.colorBgContainer,
+        borderRadius: token.borderRadiusSM,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        padding: token.paddingLG
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: token.marginLG }}>
+          <div>
+            <Title level={4} style={{ margin: 0 }}>
+              <Space><SafetyCertificateOutlined /> 系统中枢设置</Space>
+            </Title>
+            <Text type="secondary">配置全局参数与资产安全策略，监控系统核心引擎状态</Text>
+          </div>
+          <Button icon={<SyncOutlined />} onClick={fetchHealth}>刷新状态</Button>
+        </div>
+
+        {/* [P1] layout: 优化 Tabs 样式，使其更符合严肃风格 */}
+        <Tabs 
+          tabPosition="left" 
+          items={tabItems} 
+          style={{ minHeight: 400 }}
+          tabBarStyle={{ borderRight: `1px solid ${token.colorBorderSecondary}`, width: 160 }}
+        />
+      </div>
     </div>
   );
 };

@@ -38,9 +38,9 @@ async def get_current_user(
     
     # 1. 单设备登录校验 (实施约束规则 7)
     from app.models.org import UserSession
-    stmt_session = select(UserSession).where(UserSession.user_id == int(user_id))
+    stmt_session = select(UserSession).where(UserSession.user_id == int(user_id)).order_by(UserSession.created_at.desc())
     session_res = await db.execute(stmt_session)
-    session = session_res.scalar_one_or_none()
+    session = session_res.scalars().first()
     
     # 如果会话不存在或 access_jti 不匹配（说明已被踢出或登出）
     if not session or session.access_jti != access_jti:
@@ -51,7 +51,8 @@ async def get_current_user(
         )
 
     # 2. 数据库核身
-    stmt = select(SystemUser).where(SystemUser.user_id == int(user_id))
+    from sqlalchemy.orm import selectinload
+    stmt = select(SystemUser).where(SystemUser.user_id == int(user_id)).options(selectinload(SystemUser.department))
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # AI & Ollama Settings
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "gemma4:e4b"
+    OLLAMA_EMBEDDING_MODEL: str = "bge-m3"
     OLLAMA_TIMEOUT_SECONDS: int = 120
     AI_RATE_LIMIT_PER_MINUTE: int = 5
     EMBEDDING_DIMENSION: int = 1024  # 适配 bge-m3

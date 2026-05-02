@@ -26,7 +26,7 @@ async def seed_data():
                 username="admin",
                 full_name="系统管理员",
                 password_hash=get_password_hash("Admin123!"),
-                dept_id=admin_dept.id,
+                dept_id=admin_dept.dept_id,
                 role_level=99,
                 is_active=True
             )

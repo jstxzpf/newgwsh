@@ -81,7 +81,10 @@ async def read_user_me(
 ) -> Any:
     """获取当前用户信息"""
     # 转换为 User 响应模型，确保 ID 映射正确
-    return success(data=current_user)
+    user_data = User.model_validate(current_user)
+    if current_user.department:
+        user_data.department_name = current_user.department.dept_name
+    return success(data=user_data)
 
 @router.post("/refresh", response_model=StandardResponse[Token])
 async def refresh_token(

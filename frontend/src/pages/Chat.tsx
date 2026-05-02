@@ -1,34 +1,80 @@
 import React, { useState } from 'react';
-import { Card, Input, Button, List, Avatar, Divider, Layout, Tree } from 'antd';
-import { SendOutlined, UserOutlined, RobotOutlined } from '@ant-design/icons';
+import { Card, Input, Button, List, Avatar, Divider, Layout, Tree, Typography, Space } from 'antd';
+import { SendOutlined, UserOutlined, RobotOutlined, MessageOutlined } from '@ant-design/icons';
+
+import { useAuthStore } from '../stores/authStore';
 
 const { Sider, Content } = Layout;
+const { Title, Text } = Typography;
 
 const Chat: React.FC = () => {
+  const { token } = useAuthStore();
   const [messages, setMessages] = useState([
     { role: 'assistant', content: '您好，我是泰兴调查队政务助手。您可以向我咨询挂载知识库中的统计指标或政策法规。' }
   ]);
   const [inputValue, setInputValue] = useState('');
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!inputValue.trim()) return;
     
-    const newMsg = { role: 'user', content: inputValue };
-    setMessages([...messages, newMsg]);
+    const query = inputValue;
+    const newMsg = { role: 'user', content: query };
+    setMessages(prev => [...prev, newMsg]);
     setInputValue('');
 
-    // Mock response
-    setTimeout(() => {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: '根据《2024年一季度统计分析》，泰兴市第一产业总产值为 123.4 亿元，同比增长 4.5%。数据来源：[2024一季度分析.docx]'
-      }]);
-    }, 1000);
+    const aiMsgId = Date.now();
+    setMessages(prev => [...prev, { role: 'assistant', content: '', id: aiMsgId } as any]);
+
+    try {
+      const response = await fetch('/api/v1/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token || ''}`
+        },
+        body: JSON.stringify({ query, context_kb_ids: [] }),
+      });
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let aiContent = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.token) {
+                  aiContent += data.token;
+                  setMessages(prev => prev.map((m, idx) => 
+                    (idx === prev.length - 1) ? { ...m, content: aiContent } : m
+                  ));
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Chat error:', error);
+    }
   };
 
   return (
     <Layout style={{ height: 'calc(100vh - 64px - 24px)', background: '#fff' }}>
       <Sider width={280} theme="light" style={{ borderRight: '1px solid #e8e8e8', padding: 16 }}>
+        <div style={{ marginBottom: 16 }}>
+          <Title level={4} style={{ margin: 0 }}>
+            <Space><MessageOutlined /> 智能咨询助手</Space>
+          </Title>
+        </div>
+        <Divider style={{ margin: '12px 0' }} />
         <h3>知识挂载范围</h3>
         <p style={{ fontSize: 12, color: '#999' }}>勾选后 AI 将优先检索相关台账</p>
         <Divider style={{ margin: '12px 0' }} />

@@ -2,7 +2,7 @@ import hashlib
 import io
 import os
 from typing import Any, Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -81,7 +81,9 @@ async def list_documents(
     result = await db.execute(stmt)
     items = result.scalars().all()
     
-    return success(data={"items": items, "total": len(items)})
+    # [P0] harden: 显式进行 Pydantic 序列化以避免 500 错误
+    data_items = [DocumentRead.model_validate(item).model_dump() for item in items]
+    return success(data={"items": data_items, "total": len(data_items)})
 
 @router.get("/{doc_id}", response_model=StandardResponse[DocumentDetail])
 async def get_document(
@@ -271,12 +273,15 @@ async def revise_document(
 @router.post("/{doc_id}/apply-polish", response_model=StandardResponse)
 async def apply_polish(
     doc_id: str,
-    final_content: str,
+    final_content: str = Body(..., embed=True),
     db: AsyncSession = Depends(deps.get_async_db),
     current_user: SystemUser = Depends(deps.get_current_user)
 ) -> Any:
     """接受 AI 润色: 备份原稿并覆写 (P5.1 原子性铁律)"""
-    async with db.begin():
+    # 显式使用事务处理，确保备份与覆写的一致性
+    # 如果依赖注入中已经开启了事务（如 get_current_user 触发了 select），
+    # 这里的 begin() 会报错，因此使用 begin_nested() 或直接执行后 commit
+    async with db.begin_nested():
         stmt = select(Document).where(Document.doc_id == doc_id).with_for_update()
         result = await db.execute(stmt)
         doc = result.scalar_one_or_none()
@@ -301,7 +306,8 @@ async def apply_polish(
         
         # 3. 记录审计 (WorkflowNode: 21=POLISH_APPLIED)
         db.add(WorkflowAudit(doc_id=doc.doc_id, workflow_node_id=21, operator_id=current_user.user_id))
-        
+    
+    await db.commit()
     return success(message="Polish applied and original content backed up")
 
 @router.post("/{doc_id}/discard-polish", response_model=StandardResponse)
@@ -336,7 +342,22 @@ async def list_snapshots(
     stmt = stmt.order_by(DocumentSnapshot.created_at.desc())
     stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
-    return success(data=result.scalars().all())
+    items = result.scalars().all()
+    
+    # [P0] harden: 显式进行 Pydantic 序列化
+    from pydantic import ConfigDict, BaseModel
+    from datetime import datetime
+    class SnapshotOut(BaseModel):
+        snapshot_id: int
+        doc_id: str
+        content: Optional[str]
+        trigger_event: str
+        creator_id: int
+        created_at: datetime
+        model_config = ConfigDict(from_attributes=True)
+        
+    data_items = [SnapshotOut.model_validate(item).model_dump() for item in items]
+    return success(data={"items": data_items, "total": len(data_items)})
 
 @router.post("/{doc_id}/snapshots/{snapshot_id}/restore", response_model=StandardResponse)
 async def restore_snapshot(
@@ -346,7 +367,7 @@ async def restore_snapshot(
     current_user: SystemUser = Depends(deps.get_current_user)
 ) -> Any:
     """恢复快照"""
-    async with db.begin():
+    async with db.begin_nested():
         snapshot = await db.get(DocumentSnapshot, snapshot_id)
         if not snapshot or snapshot.doc_id != doc_id:
             return error(code=404, message="Snapshot not found")
@@ -355,6 +376,8 @@ async def restore_snapshot(
             return error(code=409, message="Illegal state")
         doc.content = snapshot.content
         db.add(WorkflowAudit(doc_id=doc.doc_id, workflow_node_id=12, operator_id=current_user.user_id))
+    
+    await db.commit()
     return success(message="Snapshot restored")
 
 @router.get("/{doc_id}/verify-sip", response_model=StandardResponse)
