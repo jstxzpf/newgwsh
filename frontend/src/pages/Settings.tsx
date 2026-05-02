@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tabs, Table, Tag, Button, Form, Switch, InputNumber, Row, Col, Statistic, List, Typography, theme, message, Space } from 'antd';
+import { Tabs, Table, Tag, Button, Form, Switch, InputNumber, Row, Col, Statistic, List, Typography, theme, message, Space, Modal, Input } from 'antd';
 import {
   UserOutlined,
   GlobalOutlined,
@@ -28,6 +28,10 @@ const Settings: React.FC = () => {
   const { token } = theme.useToken();
   const [loading, setLoading] = useState(false);
   const [health, setHealth] = useState<SystemStatus | null>(null);
+  
+  const [prompts, setPrompts] = useState<{filename: string, path: string}[]>([]);
+  const [editPromptVisible, setEditPromptVisible] = useState(false);
+  const [currentPrompt, setCurrentPrompt] = useState<{filename: string, content: string} | null>(null);
 
   const fetchHealth = async () => {
     try {
@@ -39,8 +43,39 @@ const Settings: React.FC = () => {
     }
   };
 
+  const fetchPrompts = async () => {
+    try {
+      const res = await sysService.getPrompts();
+      setPrompts(res);
+    } catch (error) {
+      console.error('Failed to fetch prompts', error);
+    }
+  };
+
+  const handleEditPrompt = async (filename: string) => {
+    try {
+      const res = await sysService.getPrompt(filename);
+      setCurrentPrompt(res);
+      setEditPromptVisible(true);
+    } catch (error) {
+      message.error('无法读取提示词内容');
+    }
+  };
+
+  const handleSavePrompt = async () => {
+    if (!currentPrompt) return;
+    try {
+      await sysService.updatePrompt(currentPrompt.filename, currentPrompt.content);
+      message.success('提示词已保存并热加载');
+      setEditPromptVisible(false);
+    } catch (error) {
+      message.error('保存失败');
+    }
+  };
+
   useEffect(() => {
     fetchHealth();
+    fetchPrompts();
   }, []);
 
   const tabItems = [
@@ -100,8 +135,8 @@ const Settings: React.FC = () => {
               <div style={{ padding: token.paddingMD, background: token.colorFillQuaternary, borderRadius: token.borderRadiusSM }}>
                 <Statistic 
                   title="数据库状态" 
-                  value={health?.db_online ? '在线' : '离线'} 
-                  valueStyle={{ color: health?.db_online ? token.colorSuccess : token.colorError }} 
+                  value={health?.db_connected ? '在线' : '离线'} 
+                  valueStyle={{ color: health?.db_connected ? token.colorSuccess : token.colorError }} 
                   prefix={<CheckCircleOutlined />} 
                 />
               </div>
@@ -110,8 +145,8 @@ const Settings: React.FC = () => {
               <div style={{ padding: token.paddingMD, background: token.colorFillQuaternary, borderRadius: token.borderRadiusSM }}>
                 <Statistic 
                   title="Redis 状态" 
-                  value={health?.redis_online ? '在线' : '离线'} 
-                  valueStyle={{ color: health?.redis_online ? token.colorSuccess : token.colorError }} 
+                  value={health?.redis_connected ? '在线' : '离线'} 
+                  valueStyle={{ color: health?.redis_connected ? token.colorSuccess : token.colorError }} 
                   prefix={<CheckCircleOutlined />} 
                 />
               </div>
@@ -120,9 +155,9 @@ const Settings: React.FC = () => {
               <div style={{ padding: token.paddingMD, background: token.colorFillQuaternary, borderRadius: token.borderRadiusSM }}>
                 <Statistic 
                   title="AI 联机引擎" 
-                  value={health?.ai_online ? '正常' : '异常'} 
-                  valueStyle={{ color: health?.ai_online ? token.colorSuccess : token.colorError }} 
-                  prefix={<SyncOutlined spin={health?.ai_online} />} 
+                  value={health?.ai_engine_online ? '正常' : '异常'} 
+                  valueStyle={{ color: health?.ai_engine_online ? token.colorSuccess : token.colorError }} 
+                  prefix={<SyncOutlined spin={health?.ai_engine_online} />} 
                 />
               </div>
             </Col>
@@ -130,9 +165,9 @@ const Settings: React.FC = () => {
               <div style={{ padding: token.paddingMD, background: token.colorFillQuaternary, borderRadius: token.borderRadiusSM }}>
                 <Statistic 
                   title="CPU 资源占用" 
-                  value={health?.cpu_usage || 15} 
+                  value={health?.cpu_usage_pct || 15} 
                   suffix="%" 
-                  valueStyle={{ color: (health?.cpu_usage || 0) > 80 ? token.colorError : token.colorInfo }}
+                  valueStyle={{ color: (health?.cpu_usage_pct || 0) > 80 ? token.colorError : token.colorInfo }}
                 />
               </div>
             </Col>
@@ -145,13 +180,13 @@ const Settings: React.FC = () => {
       label: <span><FileTextOutlined /> 提示词管理</span>,
       children: (
         <List
-          dataSource={['system_chat.txt', 'system_polish.txt']}
-          renderItem={(item: string) => (
-            <List.Item actions={[<Button type="link">在线编辑</Button>]}>
+          dataSource={prompts}
+          renderItem={(item: {filename: string, path: string}) => (
+            <List.Item actions={[<Button type="link" onClick={() => handleEditPrompt(item.filename)}>在线编辑</Button>]}>
               <List.Item.Meta 
                 avatar={<FileTextOutlined style={{ fontSize: 24, color: token.colorPrimary }} />}
-                title={item} 
-                description="核心业务逻辑支撑文件 | 最后更新: 2026-04-30" 
+                title={item.filename} 
+                description={`核心业务逻辑支撑文件 | 路径: ${item.path}`} 
               />
             </List.Item>
           )}
@@ -206,6 +241,22 @@ const Settings: React.FC = () => {
           tabBarStyle={{ borderRight: `1px solid ${token.colorBorderSecondary}`, width: 160 }}
         />
       </div>
+
+      <Modal
+        title={`编辑提示词: ${currentPrompt?.filename}`}
+        open={editPromptVisible}
+        onOk={handleSavePrompt}
+        onCancel={() => setEditPromptVisible(false)}
+        width={800}
+        okText="保存并热加载"
+      >
+        <Input.TextArea
+          rows={15}
+          value={currentPrompt?.content}
+          onChange={(e) => setCurrentPrompt(prev => prev ? { ...prev, content: e.target.value } : null)}
+          style={{ fontFamily: 'monospace' }}
+        />
+      </Modal>
     </div>
   );
 };

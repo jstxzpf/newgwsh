@@ -103,10 +103,33 @@ async def list_prompts(
     files = os.listdir(prompt_dir)
     return success(data=[{"filename": f, "path": os.path.join(prompt_dir, f)} for f in files if f.endswith(".txt")])
 
+@router.get("/prompts/{filename}", response_model=StandardResponse)
+async def get_prompt(
+    filename: str,
+    current_user: SystemUser = Depends(deps.get_current_admin_user)
+) -> Any:
+    """获取提示词文件内容"""
+    if not filename.endswith(".txt"):
+        return error(code=400, message="Only .txt files allowed")
+        
+    path = os.path.join(settings.PROMPTS_ROOT, filename)
+    if not os.path.exists(path):
+        return error(code=404, message="Prompt file not found")
+        
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    return success(data={"filename": filename, "content": content})
+
+from pydantic import BaseModel
+
+class PromptUpdateReq(BaseModel):
+    content: str
+
 @router.put("/prompts/{filename}", response_model=StandardResponse)
 async def update_prompt(
     filename: str,
-    content: str,
+    req: PromptUpdateReq,
     current_user: SystemUser = Depends(deps.get_current_admin_user)
 ) -> Any:
     """更新提示词文件并触发热加载 (实施约束规则 8)"""
@@ -115,7 +138,7 @@ async def update_prompt(
         
     path = os.path.join(settings.PROMPTS_ROOT, filename)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
+        f.write(req.content)
     
     # 自动热加载
     from app.services.prompt_service import prompt_loader

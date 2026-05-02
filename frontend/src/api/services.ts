@@ -198,4 +198,13 @@ export const sysService = {
     
   getConfig: () => 
     apiClient.get<any, any>('/sys/config'),
+    
+  getPrompts: () => 
+    apiClient.get<any, {filename: string, path: string}[]>('/sys/prompts'),
+    
+  getPrompt: (filename: string) =>
+    apiClient.get<any, {filename: string, content: string}>(`/sys/prompts/${filename}`),
+    
+  updatePrompt: (filename: string, content: string) =>
+    apiClient.put<any, void>(`/sys/prompts/${filename}`, { content }),
 };
