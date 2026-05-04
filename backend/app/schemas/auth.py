@@ -14,3 +14,4 @@ class UserInfoResponse(BaseModel):
     full_name: str
     role_level: int
     dept_id: int | None
+    department_name: str | None = None

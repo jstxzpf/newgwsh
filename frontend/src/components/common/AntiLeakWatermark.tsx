@@ -12,7 +12,7 @@ export const AntiLeakWatermark: React.FC = () => {
 
   if (!userInfo) return null;
 
-  const watermarkText = `${userInfo.username} ${userInfo.full_name} ${timeStr}`;
+  const watermarkText = `${userInfo.username} ${userInfo.full_name} ${userInfo.department_name || ''} ${timeStr}`;
 
   return (
     <div

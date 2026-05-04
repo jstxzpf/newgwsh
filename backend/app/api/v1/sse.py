@@ -12,6 +12,11 @@ router = APIRouter()
 
 @router.post("/ticket")
 async def get_ticket(req: TicketRequest, current_user: SystemUser = Depends(get_current_user)):
+    # 特殊处理全局通知票据
+    if req.task_id == "user_events":
+        ticket = await generate_sse_ticket("user_events", current_user.user_id)
+        return {"code": 200, "message": "success", "data": {"ticket": ticket}}
+
     is_owner = await verify_task_owner(req.task_id, current_user.user_id)
     if not is_owner:
         raise BusinessException(403, "无权访问此任务的通知")
@@ -21,10 +26,9 @@ async def get_ticket(req: TicketRequest, current_user: SystemUser = Depends(get_
 
 @router.get("/{task_id}/events")
 async def task_events(request: Request, task_id: str, ticket: str = Query(...)):
-    # 验证票据（阅后即焚）
     ticket_data = await consume_sse_ticket(ticket)
     if not ticket_data or ticket_data.get("task_id") != task_id:
-        raise BusinessException(403, "无效或已过期的票据，请重新申请")
+        raise BusinessException(403, "无效或已过期的票据")
         
     async def event_generator():
         pubsub = redis_client.pubsub()
@@ -35,10 +39,36 @@ async def task_events(request: Request, task_id: str, ticket: str = Query(...)):
                     break
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 if message and message['type'] == 'message':
-                    data = message['data']
-                    yield f"event: task_update\ndata: {data}\n\n"
+                    data_obj = json.loads(message['data'])
+                    event_type = data_obj.get("event", "task.progress")
+                    yield f"event: {event_type}\ndata: {message['data']}\n\n"
                 await asyncio.sleep(0.1)
         finally:
             await pubsub.unsubscribe(f"task_events:{task_id}")
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@router.get("/user-events")
+async def user_events(request: Request, ticket: str = Query(...)):
+    ticket_data = await consume_sse_ticket(ticket)
+    if not ticket_data or ticket_data.get("task_id") != "user_events":
+        raise BusinessException(403, "无效或已过期的票据")
+    
+    user_id = ticket_data.get("user_id")
+        
+    async def event_generator():
+        pubsub = redis_client.pubsub()
+        # 订阅个人频道
+        await pubsub.subscribe(f"user_events:{user_id}")
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message and message['type'] == 'message':
+                    yield f"data: {message['data']}\n\n"
+                await asyncio.sleep(0.1)
+        finally:
+            await pubsub.unsubscribe(f"user_events:{user_id}")
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

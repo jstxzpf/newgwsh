@@ -34,12 +34,21 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
     return {"code": 200, "message": "success", "data": {"access_token": access_token, "token_type": "bearer"}}
 
 @router.get("/me", response_model=dict)
-async def get_me(current_user: SystemUser = Depends(get_current_user)):
+async def get_me(current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.models.user import Department
+    result = await db.execute(
+        select(SystemUser, Department.dept_name)
+        .outerjoin(Department, SystemUser.dept_id == Department.dept_id)
+        .where(SystemUser.user_id == current_user.user_id)
+    )
+    user_row = result.first()
+    
     data = UserInfoResponse(
         user_id=current_user.user_id,
         username=current_user.username,
         full_name=current_user.full_name,
         role_level=current_user.role_level,
-        dept_id=current_user.dept_id
+        dept_id=current_user.dept_id,
+        department_name=user_row[1] if user_row else None
     )
     return {"code": 200, "message": "success", "data": data.model_dump()}

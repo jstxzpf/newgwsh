@@ -3,7 +3,7 @@ from sqlalchemy import select
 from app.models.system import AsyncTask
 from app.models.document import Document
 from app.core.exceptions import BusinessException
-from app.tasks.worker import dummy_polish_task
+from app.tasks.worker import process_polish_task
 import uuid
 
 class TaskService:
@@ -35,5 +35,5 @@ class TaskService:
         db.add(new_task)
         
         # 派发 Celery
-        dummy_polish_task.delay(task_id, doc_id)
+        process_polish_task.delay(task_id, doc_id)
         return task_id
