@@ -13,6 +13,8 @@ import { apiClient } from './api/client';
 import { Login } from './pages/Login/Login';
 import { Dashboard } from './pages/Dashboard/Dashboard';
 import { Workspace } from './pages/Workspace/Workspace';
+import { Documents } from './pages/Documents/Documents';
+import { Knowledge } from './pages/Knowledge/Knowledge';
 
 // 路由守卫组件
 const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -51,8 +53,8 @@ export const App: React.FC = () => {
           }>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
-            <Route path="documents" element={<div>Documents</div>} />
-            <Route path="knowledge" element={<div>Knowledge Base</div>} />
+            <Route path="documents" element={<Documents />} />
+            <Route path="knowledge" element={<Knowledge />} />
             <Route path="approvals" element={<div>Approvals</div>} />
             <Route path="chat" element={<div>Chat</div>} />
             <Route path="settings" element={<div>Settings</div>} />

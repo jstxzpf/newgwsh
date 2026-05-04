@@ -1,10 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from app.models.document import Document, DocumentSnapshot
 from app.models.system import DocumentApprovalLog, NBSWorkflowAudit
 from app.models.enums import DocumentStatus, WorkflowNodeId
 from app.core.sip import generate_sip_hash
 from app.core.exceptions import BusinessException
+from app.core.locks import acquire_redis_lock, release_redis_lock
 import uuid
 from datetime import datetime, timezone
 
@@ -32,7 +33,7 @@ class DocumentService:
 
     @staticmethod
     async def auto_save_draft(db: AsyncSession, doc: Document, title: str | None, content: str | None, draft_content: str | None):
-        # DIFF 保护逻辑矩阵
+        # DIFF 保护逻辑矩阵 (依据后端设计方案 §二.2)
         if doc.ai_polished_content:
             # DIFF 模式
             if content is not None:
@@ -48,6 +49,85 @@ class DocumentService:
                 
         if title is not None:
             doc.title = title
+
+    @staticmethod
+    async def submit_document(db: AsyncSession, doc: Document, user_id: int):
+        # 铁律：前置状态校验 (§七.1)
+        if doc.status != DocumentStatus.DRAFTING:
+            raise BusinessException(409, "当前状态不可提交")
+        
+        # 逻辑：变更状态并释放锁
+        doc.status = DocumentStatus.SUBMITTED
+        
+        log = DocumentApprovalLog(
+            doc_id=doc.doc_id,
+            submitter_id=user_id,
+            decision_status="SUBMITTED",
+            submitted_at=datetime.now(timezone.utc)
+        )
+        db.add(log)
+        
+        audit = NBSWorkflowAudit(
+            doc_id=doc.doc_id,
+            workflow_node_id=WorkflowNodeId.SUBMITTED,
+            operator_id=user_id
+        )
+        db.add(audit)
+        # 注意：锁释放由调用方在 commit 后执行或通过 API 逻辑保证
+
+    @staticmethod
+    async def revise_document(db: AsyncSession, doc: Document, user_id: int, username: str) -> dict:
+        # 铁律：原子性回退与抢锁顺序 (§七.1)
+        if doc.status != DocumentStatus.REJECTED:
+            raise BusinessException(409, "公文当前状态不允许回退修改")
+        
+        token = str(uuid.uuid4())
+        # 原子抢锁
+        success = await acquire_redis_lock(doc.doc_id, user_id, username, token, ttl=180)
+        if not success:
+            raise BusinessException(409, "锁已被抢占，无法回退")
+        
+        # 状态回退与清空建议稿
+        doc.status = DocumentStatus.DRAFTING
+        doc.ai_polished_content = None
+        doc.draft_suggestion = None
+        
+        audit = NBSWorkflowAudit(
+            doc_id=doc.doc_id,
+            workflow_node_id=WorkflowNodeId.REVISION,
+            operator_id=user_id
+        )
+        db.add(audit)
+        
+        return {
+            "doc_id": doc.doc_id,
+            "new_status": DocumentStatus.DRAFTING,
+            "lock_acquired": True,
+            "lock_token": token,
+            "lock_expires_at": (datetime.now(timezone.utc).timestamp() + 180)
+        }
+
+    @staticmethod
+    async def apply_polish(db: AsyncSession, doc: Document, final_content: str, user_id: int):
+        # 铁律 (§四.1)：接受前备份快照
+        snapshot = DocumentSnapshot(
+            doc_id=doc.doc_id,
+            content=doc.content,
+            trigger_event="POLISH_APPLIED",
+            creator_id=user_id
+        )
+        db.add(snapshot)
+        
+        doc.content = final_content
+        doc.ai_polished_content = None
+        doc.draft_suggestion = None
+        
+        audit = NBSWorkflowAudit(
+            doc_id=doc.doc_id,
+            workflow_node_id=WorkflowNodeId.POLISH_APPLIED,
+            operator_id=user_id
+        )
+        db.add(audit)
 
     @staticmethod
     async def process_approval(db: AsyncSession, doc: Document, action: str, reviewer_id: int, comments: str | None):
@@ -82,3 +162,14 @@ class DocumentService:
         )
         db.add(audit)
         return log.log_id
+
+    @staticmethod
+    async def create_snapshot(db: AsyncSession, doc_id: str, content: str, user_id: int, event: str):
+        snapshot = DocumentSnapshot(
+            doc_id=doc_id,
+            content=content,
+            trigger_event=event,
+            creator_id=user_id
+        )
+        db.add(snapshot)
+        return snapshot.snapshot_id

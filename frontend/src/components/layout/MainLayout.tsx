@@ -1,45 +1,79 @@
-import React from 'react';
-import { Layout, Menu } from 'antd';
-import { Outlet, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Layout, Menu, Space, Badge } from 'antd';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
+import { apiClient } from '../../api/client';
 
 const { Header, Sider, Content, Footer } = Layout;
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const userInfo = useAuthStore(state => state.userInfo);
+  const [aiStatus, setAiStatus] = useState<'online' | 'offline'>('offline');
+
+  useEffect(() => {
+    // 全局探针 (§三.1)
+    const checkStatus = async () => {
+      try {
+        const res = await apiClient.get('/sys/status');
+        if (res.data.data.ai_engine_online) setAiStatus('online');
+        else setAiStatus('offline');
+      } catch {
+        setAiStatus('offline');
+      }
+    };
+    checkStatus();
+    const timer = setInterval(checkStatus, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Header style={{ background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontWeight: 'bold', fontSize: '18px' }}>泰兴调查队公文处理系统</div>
-        <div>
-          {userInfo?.full_name} ({userInfo?.username})
+      <Header style={{ background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', zIndex: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <img src="/logo.png" alt="logo" style={{ height: '32px', marginRight: '12px' }} />
+          <div style={{ fontWeight: 'bold', fontSize: '18px', color: '#003366' }}>国家统计局泰兴调查队公文处理系统</div>
         </div>
+        <Space size="large">
+           <Badge count={0} dot offset={[-2, 0]}>
+             <span style={{ fontSize: '18px', cursor: 'pointer' }}>🔔</span>
+           </Badge>
+           <span style={{ fontWeight: 500 }}>{userInfo?.full_name} ({userInfo?.department_name})</span>
+        </Space>
       </Header>
       <Layout>
-        <Sider width={240} style={{ background: '#003366' }}>
+        <Sider width={240} style={{ background: '#003366' }} collapsible>
           <Menu
             theme="dark"
             mode="inline"
-            defaultSelectedKeys={['dashboard']}
-            style={{ background: 'transparent' }}
+            selectedKeys={[location.pathname.split('/')[1] || 'dashboard']}
+            style={{ background: 'transparent', borderRight: 0 }}
             items={[
-              { key: 'dashboard', label: '工作台', onClick: () => navigate('/dashboard') },
-              { key: 'documents', label: '公文中心', onClick: () => navigate('/documents') },
-              { key: 'knowledge', label: '知识库', onClick: () => navigate('/knowledge') },
-              { key: 'approvals', label: '审批管控', onClick: () => navigate('/approvals') },
-              { key: 'chat', label: '智能问答', onClick: () => navigate('/chat') },
-              { key: 'settings', label: '系统中枢', onClick: () => navigate('/settings') },
+              { key: 'dashboard', label: '个人工作台', onClick: () => navigate('/dashboard') },
+              { key: 'documents', label: '公文管理中心', onClick: () => navigate('/documents') },
+              { key: 'knowledge', label: '统计知识资产', onClick: () => navigate('/knowledge') },
+              { key: 'approvals', label: '科长签批管控', onClick: () => navigate('/approvals'), disabled: (userInfo?.role_level || 0) < 5 },
+              { key: 'chat', label: '智能穿透问答', onClick: () => navigate('/chat') },
+              { key: 'settings', label: '系统中枢设置', onClick: () => navigate('/settings'), disabled: (userInfo?.role_level || 0) < 99 },
             ]}
           />
         </Sider>
-        <Layout style={{ padding: '24px' }}>
-          <Content style={{ background: '#f0f2f5', margin: 0, minHeight: 280 }}>
+        <Layout>
+          <Content style={{ background: '#f0f2f5', margin: 0, minHeight: 280, position: 'relative' }}>
             <Outlet />
           </Content>
-          <Footer style={{ textAlign: 'center', height: '24px', padding: '0' }}>
-            系统探针: 在线 | Copyright © 2026
+          <Footer style={{ 
+            textAlign: 'center', height: '24px', padding: '0 16px', 
+            background: '#333', color: '#fff', fontSize: '12px',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+          }}>
+            <div>
+               AI 引擎探针: <Badge status={aiStatus === 'online' ? 'success' : 'error'} text={aiStatus === 'online' ? '在线' : '离线'} style={{ color: '#fff' }} />
+            </div>
+            <div>
+               © 2026 国家统计局泰兴调查队 | V3.0
+            </div>
           </Footer>
         </Layout>
       </Layout>

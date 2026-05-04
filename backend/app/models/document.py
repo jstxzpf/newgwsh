@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, validates, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
@@ -66,11 +66,18 @@ class Document(Base):
     reviewer = relationship("SystemUser", foreign_keys=[reviewer_id])
     snapshots = relationship("DocumentSnapshot", back_populates="document", cascade="all, delete-orphan")
 
+    __table_args__ = (
+        Index(
+            "idx_doc_dept_status",
+            dept_id,
+            status,
+            postgresql_where=(is_deleted == False),
+        ),
+    )
+
     @validates('status')
     def validate_status_transition(self, key, value):
         if self.status and value != self.status:
-            # 获取转换前的状态（如果是新创建的对象，self.status 可能已经预置了默认值）
-            # 这里的简单检查主要是拦截非法的后续流转
             if value not in VALID_TRANSITIONS.get(self.status, []):
                 raise ValueError(f"Invalid transition from {self.status} to {value}")
         return value

@@ -1,6 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.document import Document
+from app.models.system import NBSWorkflowAudit
+from app.models.enums import WorkflowNodeId
 from app.core.locks import acquire_redis_lock, release_redis_lock, extend_redis_lock
 from app.core.exceptions import BusinessException
 import uuid
@@ -31,6 +33,7 @@ class LockService:
     @staticmethod
     async def release_lock(db: AsyncSession, doc_id: str, user_id: int, token: str, content: str | None = None):
         if content is not None:
+            # 容灾释放逻辑 (§二.3)：先存后放
             result = await db.execute(select(Document).where(Document.doc_id == doc_id))
             doc = result.scalars().first()
             if doc and doc.status == "DRAFTING":
@@ -38,3 +41,16 @@ class LockService:
                 await db.commit()
                 
         await release_redis_lock(doc_id, user_id, token)
+
+    @staticmethod
+    async def force_release(db: AsyncSession, doc_id: str, admin_id: int):
+        # 强制释放锁并记录审计 (铁律 §二.3)
+        await release_redis_lock(doc_id, user_id=0, token="", force=True) # 内部 force 逻辑
+        
+        audit = NBSWorkflowAudit(
+            doc_id=doc_id,
+            workflow_node_id=99, # 强制释放特殊代码
+            operator_id=admin_id,
+            action_details={"action": "FORCE_RELEASE_LOCK"}
+        )
+        db.add(audit)

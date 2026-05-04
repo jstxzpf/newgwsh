@@ -46,7 +46,7 @@ class NBSWorkflowAudit(Base):
 class DocumentApprovalLog(Base):
     __tablename__ = "document_approval_logs"
     log_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    doc_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    doc_id: Mapped[str] = mapped_column(String(64), ForeignKey("documents.doc_id"), index=True, nullable=False)
     submitter_id: Mapped[int] = mapped_column(Integer, ForeignKey("system_users.user_id"), nullable=False)
     reviewer_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("system_users.user_id"), nullable=True)
     decision_status: Mapped[str] = mapped_column(String(32), nullable=False) # SUBMITTED/APPROVED/REJECTED
@@ -56,6 +56,7 @@ class DocumentApprovalLog(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
+    document = relationship("Document")
     submitter = relationship("SystemUser", foreign_keys=[submitter_id])
     reviewer = relationship("SystemUser", foreign_keys=[reviewer_id])
 

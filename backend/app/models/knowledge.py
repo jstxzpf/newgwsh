@@ -63,6 +63,8 @@ class KnowledgeChunk(Base):
     kb_node = relationship("KnowledgeBaseHierarchy", back_populates="chunks")
     physical_file = relationship("KnowledgePhysicalFile", back_populates="chunks")
 
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, BigInt, Index, Computed
+...
     # 显式 HNSW 索引声明 (Task 4)
     __table_args__ = (
         Index(
@@ -71,5 +73,17 @@ class KnowledgeChunk(Base):
             postgresql_using="hnsw",
             postgresql_with={"m": 16, "ef_construction": 64},
             postgresql_ops={"embedding": "vector_cosine_ops"},
+            postgresql_where=(is_deleted == False), # 对齐索引优化建议 §四.1
+        ),
+        Index(
+            "idx_chunk_content_gin",
+            func.to_tsvector('zh', content),
+            postgresql_using="gin",
+            postgresql_where=(is_deleted == False), # 对齐索引优化建议 §四.2
+        ),
+        Index(
+            "idx_chunk_metadata_gin",
+            metadata_json,
+            postgresql_using="gin", # 对齐索引优化建议 §四.3
         ),
     )

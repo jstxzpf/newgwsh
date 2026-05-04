@@ -24,6 +24,16 @@ async def release_lock(req: LockReleaseRequest, current_user: SystemUser = Depen
     await LockService.release_lock(db, req.doc_id, current_user.user_id, req.lock_token, req.content)
     return {"code": 200, "message": "success", "data": None}
 
+@router.delete("/{doc_id}")
+async def force_reclaim_lock(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # 权限校验：管理员 (§五.5)
+    if current_user.role_level < 99:
+        raise BusinessException(403, "无权强制释放锁")
+    
+    await LockService.force_release(db, doc_id, current_user.user_id)
+    await db.commit()
+    return {"code": 200, "message": "success", "data": None}
+
 @router.get("/config")
 async def get_lock_config(current_user: SystemUser = Depends(get_current_user)):
     return {"code": 200, "message": "success", "data": {"lock_ttl_seconds": 180, "heartbeat_interval_seconds": 90}}
