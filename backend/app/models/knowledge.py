@@ -1,5 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, BigInt, Index
-from sqlalchemy.sql import func
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, BigInt, Index, func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
@@ -13,7 +12,7 @@ class KnowledgePhysicalFile(Base):
     content_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     file_path: Mapped[str] = mapped_column(String(512), nullable=False)
     file_size: Mapped[int | None] = mapped_column(BigInt, nullable=True)
-    created_at: Mapped[func.now] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     # Relationships
     nodes = relationship("KnowledgeBaseHierarchy", back_populates="physical_file")
@@ -34,8 +33,8 @@ class KnowledgeBaseHierarchy(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[func.now] = mapped_column(DateTime, nullable=False, server_default=func.now())
-    updated_at: Mapped[func.now] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
     # Relationships
     parent = relationship("KnowledgeBaseHierarchy", remote_side=[kb_id], backref="children")
@@ -43,6 +42,13 @@ class KnowledgeBaseHierarchy(Base):
     owner = relationship("SystemUser")
     dept = relationship("Department")
     chunks = relationship("KnowledgeChunk", back_populates="kb_node", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_kb_hierarchy_owner_tier", owner_id, kb_tier, postgresql_where=(is_deleted == False)),
+        Index("idx_kb_personal_unique", physical_file_id, owner_id, 
+              postgresql_where=(kb_type == KBTypeEnum.FILE) & (kb_tier == KBTier.PERSONAL) & (is_deleted == False), 
+              unique=True),
+    )
 
 class KnowledgeChunk(Base):
     __tablename__ = "knowledge_chunks"
@@ -63,9 +69,7 @@ class KnowledgeChunk(Base):
     kb_node = relationship("KnowledgeBaseHierarchy", back_populates="chunks")
     physical_file = relationship("KnowledgePhysicalFile", back_populates="chunks")
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, BigInt, Index, Computed
-...
-    # 显式 HNSW 索引声明 (Task 4)
+    # 显式 HNSW 与 GIN 索引声明 (§四)
     __table_args__ = (
         Index(
             "idx_chunk_embedding_hnsw",
@@ -73,17 +77,17 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, T
             postgresql_using="hnsw",
             postgresql_with={"m": 16, "ef_construction": 64},
             postgresql_ops={"embedding": "vector_cosine_ops"},
-            postgresql_where=(is_deleted == False), # 对齐索引优化建议 §四.1
+            postgresql_where=(is_deleted == False),
         ),
         Index(
             "idx_chunk_content_gin",
             func.to_tsvector('zh', content),
             postgresql_using="gin",
-            postgresql_where=(is_deleted == False), # 对齐索引优化建议 §四.2
+            postgresql_where=(is_deleted == False),
         ),
         Index(
             "idx_chunk_metadata_gin",
             metadata_json,
-            postgresql_using="gin", # 对齐索引优化建议 §四.3
+            postgresql_using="gin",
         ),
     )

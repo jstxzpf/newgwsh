@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { Modal, message, notification } from 'antd';
-import { useAuthStore } from '../stores/authStore';
 import { apiClient } from '../api/client';
+import { useEditorStore } from '../stores/editorStore';
+import { Modal, message } from 'antd';
 
 export function useEditorNotifications() {
   const token = useAuthStore(state => state.token);
+  const setReadOnly = useEditorStore(state => state.setReadOnly);
   const connectionRef = useRef<{ es: EventSource | null; retryCount: number; timer?: number }>({ es: null, retryCount: 0 });
 
   const connect = async () => {
@@ -26,8 +27,12 @@ export function useEditorNotifications() {
         } else if (data.type === 'notification.approved') {
           notification.success({ message: '审批通过', description: '公文已批准通过' });
         } else if (data.type === 'notification.lock_reclaimed') {
-          Modal.error({ title: '权限收回', content: `您的编辑权限已被收回: ${data.reason}` });
-          // 强制只读逻辑略
+          Modal.error({ 
+            title: '权限收回', 
+            content: `您的编辑权限已被收回: ${data.reason}`,
+            onOk: () => setReadOnly(true, 'CONFLICT')
+          });
+          setReadOnly(true, 'CONFLICT');
         }
         connectionRef.current.retryCount = 0;
       };
@@ -66,3 +71,6 @@ export function useEditorNotifications() {
     };
   }, [token]);
 }
+
+import { useAuthStore } from '../stores/authStore';
+import { notification } from 'antd';

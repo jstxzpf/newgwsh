@@ -10,6 +10,12 @@ export const GlobalTaskWatcher: React.FC = () => {
   const connectionsRef = useRef<Record<string, { es: EventSource; retryCount: number; timer?: number }>>({});
 
   const connect = async (taskId: string) => {
+    // 铁律：最大并发连接池限制 (§五.3)
+    if (Object.keys(connectionsRef.current).length >= 5) {
+      console.warn("SSE pool full, queuing task:", taskId);
+      return;
+    }
+    
     if (connectionsRef.current[taskId]?.es) return;
 
     try {
@@ -21,7 +27,6 @@ export const GlobalTaskWatcher: React.FC = () => {
       connection.es = es;
       connectionsRef.current[taskId] = connection;
 
-      // IRON RULE: 按照契约附录监听特定事件
       es.addEventListener('task.completed', (e: any) => {
         const data = JSON.parse(e.data);
         notification.success({ message: '任务完成', description: `业务处理已成功` });
@@ -41,6 +46,7 @@ export const GlobalTaskWatcher: React.FC = () => {
       });
 
       es.onerror = () => {
+        // 铁律：立即关闭阻断原生重连 (§五.3)
         es.close();
         connection.es = null;
         if (connection.retryCount < 3) {
@@ -64,7 +70,7 @@ export const GlobalTaskWatcher: React.FC = () => {
         const data = res.data.data;
         if (data.task_status === 'COMPLETED' || data.task_status === 'FAILED') {
           setTaskResult(taskId, data);
-          removeTask(taskId);
+          cleanup(taskId);
         } else {
           window.setTimeout(poll, 5000);
         }
@@ -83,6 +89,10 @@ export const GlobalTaskWatcher: React.FC = () => {
       delete connectionsRef.current[taskId];
     }
     removeTask(taskId);
+    
+    // 释放位置后尝试连接等待中的任务
+    const nextTask = activeTaskIds.find(id => !connectionsRef.current[id]);
+    if (nextTask) connect(nextTask);
   };
 
   useEffect(() => {
