@@ -1,16 +1,36 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import { TAIXING_TOKENS } from './styles/theme';
 import { MainLayout } from './components/layout/MainLayout';
 import { AntiLeakWatermark } from './components/common/AntiLeakWatermark';
 import { GlobalTaskWatcher } from './components/common/GlobalTaskWatcher';
 import { useEditorNotifications } from './hooks/useEditorNotifications';
+import { useAuthStore } from './stores/authStore';
+import { apiClient } from './api/client';
 
-// 页面占位组件
-const Login = () => <div>Login Page</div>;
-const Dashboard = () => <div>Dashboard</div>;
-const Workspace = () => <div>Workspace Editor</div>;
+// 导入真实页面组件
+import { Login } from './pages/Login/Login';
+import { Dashboard } from './pages/Dashboard/Dashboard';
+
+// 路由守卫组件
+const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { token, userInfo, setUserInfo } = useAuthStore();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (token && !userInfo) {
+      // 刷新页面或重新进入时补全信息
+      apiClient.get('/auth/me').then(res => setUserInfo(res.data.data)).catch(() => {});
+    }
+  }, [token, userInfo, setUserInfo]);
+
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return <>{children}</>;
+};
 
 export const App: React.FC = () => {
   useEditorNotifications();
@@ -22,7 +42,12 @@ export const App: React.FC = () => {
         <GlobalTaskWatcher />
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/" element={<MainLayout />}>
+          
+          <Route path="/" element={
+            <AuthGuard>
+              <MainLayout />
+            </AuthGuard>
+          }>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="documents" element={<div>Documents</div>} />
@@ -31,8 +56,12 @@ export const App: React.FC = () => {
             <Route path="chat" element={<div>Chat</div>} />
             <Route path="settings" element={<div>Settings</div>} />
           </Route>
-          {/* Workspace 脱离 Sider 全屏 */}
-          <Route path="/workspace/:doc_id" element={<Workspace />} />
+
+          <Route path="/workspace/:doc_id" element={
+            <AuthGuard>
+              <div>Workspace Fullscreen Editor (Implementation Pending)</div>
+            </AuthGuard>
+          } />
         </Routes>
       </BrowserRouter>
     </ConfigProvider>
