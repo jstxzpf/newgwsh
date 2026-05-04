@@ -12,6 +12,7 @@ import { apiClient } from './api/client';
 // 导入真实页面组件
 import { Login } from './pages/Login/Login';
 import { Dashboard } from './pages/Dashboard/Dashboard';
+import { Workspace } from './pages/Workspace/Workspace';
 
 // 路由守卫组件
 const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -59,7 +60,7 @@ export const App: React.FC = () => {
 
           <Route path="/workspace/:doc_id" element={
             <AuthGuard>
-              <div>Workspace Fullscreen Editor (Implementation Pending)</div>
+              <Workspace />
             </AuthGuard>
           } />
         </Routes>

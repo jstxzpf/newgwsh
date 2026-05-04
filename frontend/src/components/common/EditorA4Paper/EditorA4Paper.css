@@ -1,0 +1,49 @@
+.a4-scroll-container {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: auto;
+  background-color: #f0f2f5; /* 深空灰托底 */
+  padding: 40px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.a4-scaling-wrapper {
+  transition: transform 0.2s ease-out;
+  /* 确保缩放后的占位高度正确，这里使用了 min-height 同步 A4 物理高度 */
+  min-height: 1123px; 
+}
+
+.a4-paper {
+  width: 794px; /* A4 210mm @ 96DPI */
+  min-height: 1123px; /* A4 297mm @ 96DPI */
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  margin: 0 auto;
+  padding: 72px 90px; /* 近似国标页边距 */
+  position: relative;
+  /* 字体防御链：方正仿宋优先 */
+  font-family: "方正仿宋_GBK", "FZFS", "仿宋_GB2312", "仿宋", "FangSong", "STFangsong", "华文仿宋", "Noto Serif CJK SC", serif;
+  line-height: 1.5;
+  color: #333;
+}
+
+.scale-warning {
+  position: absolute;
+  top: -30px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: #faad14;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+/* 适配移动端或窄屏的强制横向滚动 */
+@media screen and (max-width: 600px) {
+  .a4-scroll-container {
+    justify-content: flex-start;
+    padding-left: 20px;
+  }
+}
