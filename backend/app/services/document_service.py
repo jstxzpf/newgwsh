@@ -164,6 +164,40 @@ class DocumentService:
         return log.log_id
 
     @staticmethod
+    async def verify_sip(db: AsyncSession, doc_id: str) -> dict:
+        # 获取该公文最新的已通过审批日志
+        result = await db.execute(
+            select(DocumentApprovalLog)
+            .where(DocumentApprovalLog.doc_id == doc_id, DocumentApprovalLog.decision_status == "APPROVED")
+            .order_by(DocumentApprovalLog.reviewed_at.desc())
+        )
+        log = result.scalars().first()
+        if not log or not log.sip_hash:
+            return {"match": False, "reason": "未找到有效的审批存证记录"}
+        
+        # 获取当前公文正文
+        doc_result = await db.execute(select(Document).where(Document.doc_id == doc_id))
+        doc = doc_result.scalars().first()
+        if not doc:
+            raise BusinessException(404, "公文不存在")
+            
+        # 重新执行归一化与哈希计算 (铁律 §六.6)
+        # 必须使用存档时的 reviewer_id 和 reviewed_at
+        current_hash = generate_sip_hash(
+            doc.content or "", 
+            log.reviewer_id, 
+            log.reviewed_at.isoformat()
+        )
+        
+        return {
+            "match": current_hash == log.sip_hash,
+            "stored_hash": log.sip_hash,
+            "calculated_hash": current_hash,
+            "reviewer_id": log.reviewer_id,
+            "reviewed_at": log.reviewed_at
+        }
+
+    @staticmethod
     async def create_snapshot(db: AsyncSession, doc_id: str, content: str, user_id: int, event: str):
         snapshot = DocumentSnapshot(
             doc_id=doc_id,

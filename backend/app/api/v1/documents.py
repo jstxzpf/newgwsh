@@ -160,4 +160,10 @@ async def create_snapshot(doc_id: str, req: SnapshotCreateRequest, current_user:
     await db.commit()
     return {"code": 200, "message": "success", "data": {"snapshot_id": sid}}
 
+@router.get("/{doc_id}/verify-sip")
+async def verify_document_sip(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # 权限校验略：一般具备审计权
+    res = await DocumentService.verify_sip(db, doc_id)
+    return {"code": 200, "message": "success", "data": res}
+
 from sqlalchemy import func
