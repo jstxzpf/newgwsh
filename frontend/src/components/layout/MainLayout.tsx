@@ -5,6 +5,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { apiClient } from '../../api/client';
 import { countWords } from '../../utils/wordCount';
+import { TAIXING_BRAND } from '../../styles/theme';
 
 const { Header, Sider, Content, Footer } = Layout;
 const { Text } = Typography;
@@ -40,7 +41,7 @@ export const MainLayout: React.FC = () => {
       <Header style={{ background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', zIndex: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <img src="/logo.png" alt="logo" style={{ height: '32px', marginRight: '12px' }} />
-          <div style={{ fontWeight: 'bold', fontSize: '18px', color: '#003366' }}>国家统计局泰兴调查队公文处理系统</div>
+          <div style={{ fontWeight: 'bold', fontSize: '18px', color: TAIXING_BRAND.primaryColor }}>{TAIXING_BRAND.fullName}</div>
         </div>
         <Space size="large">
            <Badge count={0} dot offset={[-2, 0]}>
@@ -50,7 +51,7 @@ export const MainLayout: React.FC = () => {
         </Space>
       </Header>
       <Layout>
-        <Sider width={240} style={{ background: '#003366' }} collapsible>
+        <Sider width={240} style={{ background: TAIXING_BRAND.primaryColor }} collapsible>
           <Menu
             theme="dark"
             mode="inline"
@@ -67,7 +68,7 @@ export const MainLayout: React.FC = () => {
           />
         </Sider>
         <Layout>
-          <Content style={{ background: '#f0f2f5', margin: 0, minHeight: 280, position: 'relative' }}>
+          <Content style={{ background: TAIXING_BRAND.bgColor, margin: 0, minHeight: 280, position: 'relative' }}>
             <Outlet />
           </Content>
           <Footer style={{ 
@@ -80,13 +81,13 @@ export const MainLayout: React.FC = () => {
                <span style={{ marginLeft: 6, color: '#aaa' }}>AI 探针: {aiStatus === 'online' ? '在线' : '离线'}</span>
             </div>
             <div style={{ color: '#888' }}>
-               © 2026 国家统计局泰兴调查队 | 极致匠心 V3.0
+               © 2026 {TAIXING_BRAND.name} | 极致匠心 V3.0
             </div>
             <div>
                {isWorkspace && (
                  <Space split={<Divider type="vertical" style={{ borderColor: '#666' }} />}>
                    <span style={{ color: '#aaa' }}>A4 物理排版</span>
-                   <span style={{ color: '#1890ff', fontWeight: 'bold' }}>正文计数: {wordCount}</span>
+                   <span style={{ color: TAIXING_BRAND.accentColor, fontWeight: 'bold' }}>正文计数: {wordCount}</span>
                  </Space>
                )}
             </div>

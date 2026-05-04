@@ -4,16 +4,18 @@ from app.models.document import Document
 from app.models.knowledge import KnowledgeBaseHierarchy
 from app.models.system import AsyncTask
 from app.models.enums import DocumentStatus, TaskStatus
+from app.core.config import settings
 from sqlalchemy import select
-import time
+import os
 import json
+from datetime import datetime
 
 @celery_app.task(bind=True, max_retries=3)
 def process_polish_task(self, task_id: str, doc_id: str):
     with SyncSessionLocal() as session:
         _mark_task_processing(session, task_id)
         try:
-            time.sleep(2) # 模拟 AI 推理
+            # 真实 AI 推理逻辑应调用相关 Service，此处模拟
             result_content = "AI 润色结果建议稿..."
 
             # 铁律：跨进程状态二次复核 (P0 §七.3)
@@ -34,8 +36,8 @@ def process_format_task(self, doc_id: str, task_id: str = None):
     with SyncSessionLocal() as session:
         if task_id: _mark_task_processing(session, task_id)
         try:
-            time.sleep(3) # 模拟排版
-            output_path = f"/app/data/outputs/{doc_id}.docx"
+            os.makedirs(settings.OUTPUT_DIR, exist_ok=True)
+            output_path = os.path.join(settings.OUTPUT_DIR, f"{doc_id}.docx")
 
             # 铁律：跨进程状态二次复核 (P0 §七.3)
             with session.begin():
@@ -55,7 +57,7 @@ def process_parse_task(self, kb_id: int, task_id: str = None):
     with SyncSessionLocal() as session:
         if task_id: _mark_task_processing(session, task_id)
         try:
-            time.sleep(2) # 模拟解析
+            # 真实解析逻辑应调用 ast_chunker
             
             # 铁律：跨进程状态二次复核 (P0 §七.3)
             with session.begin():
@@ -91,5 +93,3 @@ def _mark_task_failed(session, task_id, error):
         task.task_status = TaskStatus.FAILED
         task.error_message = error
         task.completed_at = datetime.now()
-
-from datetime import datetime

@@ -3,6 +3,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     PROJECT_NAME: str = "泰兴调查队公文处理系统"
     VERSION: str = "3.0"
+    ORG_NAME: str = "国家统计局泰兴调查队"
+    ORG_FULL_NAME: str = "国家统计局泰兴调查队公文处理系统"
+    
+    # 物理路径配置 (对齐 §三.5)
+    DATA_ROOT: str = "/app/data"
+    UPLOAD_DIR: str = "/app/data/uploads"
+    OUTPUT_DIR: str = "/app/data/outputs"
+    PROMPTS_DIR: str = "/app/app/prompts"
+    ARCHIVE_ROOT: str = "/app/archive"
     
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
