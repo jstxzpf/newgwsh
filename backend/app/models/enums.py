@@ -42,6 +42,17 @@ class TaskStatus(str, enum.Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
+class WorkflowNodeId(int, enum.Enum):
+    DRAFTING = 10
+    SNAPSHOT = 11
+    SNAPSHOT_RESTORE = 12
+    POLISH_REQUESTED = 20
+    POLISH_APPLIED = 21
+    SUBMITTED = 30
+    APPROVED = 40
+    REJECTED = 41
+    REVISION = 42
+
 class NotificationType(str, enum.Enum):
     TASK_COMPLETED = "TASK_COMPLETED"
     TASK_FAILED = "TASK_FAILED"
