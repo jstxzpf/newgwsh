@@ -8,6 +8,7 @@ from app.core.security import verify_password, create_access_token, create_refre
 from app.core.exceptions import BusinessException
 from app.api.dependencies import get_current_user
 from app.services.auth_service import AuthService
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -31,7 +32,13 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
     await db.commit()
     
     # Refresh Token 存放于 HttpOnly Cookie
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, max_age=7*24*3600, samesite="lax")
+    response.set_cookie(
+        key="refresh_token", 
+        value=refresh_token, 
+        httponly=True, 
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600, 
+        samesite="lax"
+    )
     return {"code": 200, "message": "success", "data": {"access_token": access_token, "token_type": "bearer"}}
 
 @router.get("/me", response_model=dict)

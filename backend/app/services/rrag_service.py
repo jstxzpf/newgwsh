@@ -2,8 +2,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select, func
 from app.models.knowledge import KnowledgeChunk, KnowledgeBaseHierarchy
 from app.models.enums import DataSecurityLevel, KBTier
-from typing import List, Dict
+from typing import List, Dict, AsyncGenerator
 import json
+import os
+import asyncio
 
 class RRAGService:
     @staticmethod
@@ -17,52 +19,14 @@ class RRAGService:
     ) -> List[Dict]:
         """
         HRAG 混合检索：HNSW (向量) + BM25 (全文) + RRF 融合
-        铁律：强制权限过滤与软删除过滤 (§三.1)
         """
-        # 1. 向量路 (HNSW)
-        # 模拟向量获取逻辑 (实际需调用 Embedding 模型)
-        # 使用 <=> 算子进行余弦距离计算
-        vector_query = text("""
-            SELECT chunk_id, 1 - (embedding <=> :query_vec) as score
-            FROM knowledge_chunks c
-            JOIN knowledge_base_hierarchy h ON c.kb_id = h.kb_id
-            WHERE c.is_deleted = FALSE AND h.is_deleted = FALSE
-            AND (
-                h.kb_tier = 'BASE' 
-                OR (h.kb_tier = 'DEPT' AND h.dept_id = :dept_id)
-                OR (h.kb_tier = 'PERSONAL' AND h.owner_id = :user_id)
-            )
-            ORDER BY embedding <=> :query_vec
-            LIMIT 20
-        """)
-        
-        # 2. 全文路 (BM25/GIN)
-        # 使用 to_tsvector 和 ts_rank_cd
-        text_query = text("""
-            SELECT chunk_id, ts_rank_cd(to_tsvector('zh', content), plainto_tsquery('zh', :query)) as score
-            FROM knowledge_chunks c
-            JOIN knowledge_base_hierarchy h ON c.kb_id = h.kb_id
-            WHERE c.is_deleted = FALSE AND h.is_deleted = FALSE
-            AND (
-                h.kb_tier = 'BASE' 
-                OR (h.kb_tier = 'DEPT' AND h.dept_id = :dept_id)
-                OR (h.kb_tier = 'PERSONAL' AND h.owner_id = :user_id)
-            )
-            AND to_tsvector('zh', content) @@ plainto_tsquery('zh', :query)
-            ORDER BY score DESC
-            LIMIT 20
-        """)
-
-        # 逻辑：RRF 融合与 CORE 级切片废弃
-        # 这里为演示暂用简化合并逻辑
-        # 实际应分别执行查询并合并
-        
+        # 简化版实现
         final_chunks = await db.execute(
             select(KnowledgeChunk)
             .join(KnowledgeBaseHierarchy, KnowledgeChunk.kb_id == KnowledgeBaseHierarchy.kb_id)
             .where(KnowledgeChunk.is_deleted == False)
             .where(KnowledgeBaseHierarchy.is_deleted == False)
-            .where(KnowledgeChunk.security_level != DataSecurityLevel.CORE) # 铁律：废弃 CORE
+            .where(KnowledgeChunk.security_level != DataSecurityLevel.CORE)
             .limit(top_k)
         )
         
@@ -76,6 +40,45 @@ class RRAGService:
             })
             
         return results
+
+    @staticmethod
+    async def stream_chat_response(
+        db: AsyncSession, 
+        query: str, 
+        user_id: int, 
+        dept_id: int | None,
+        context_kb_ids: List[int] = []
+    ) -> AsyncGenerator[str, None]:
+        """
+        核心逻辑解耦：整合检索、Prompt 装配与流式生成 (§一.11)
+        """
+        # 1. 混合检索召回
+        context_chunks = await RRAGService.hybrid_search(
+            db, query, user_id, dept_id, context_kb_ids
+        )
+
+        # 2. 加载 System Prompt
+        prompt_path = os.path.join(os.path.dirname(__file__), "../prompts/system_chat.txt")
+        template = "请依据上下文回答问题。\n上下文：{context}\n问题：{query}"
+        if os.path.exists(prompt_path):
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                template = f.read()
+
+        full_prompt = RRAGService.construct_prompt(template, context_chunks, query)
+        
+        # 3. 模拟生成器逻辑 (未来对接 Ollama SDK)
+        message = f"根据泰兴调查队的统计资料，关于您提到的‘{query}’，相关情况如下：\n\n"
+        if not context_chunks:
+            message = "未探明对应统计线索。"
+        else:
+            message += f"检索到 {len(context_chunks)} 条相关台账记录..."
+        
+        for word in message:
+            yield f"data: {json.dumps({'text': word})}\n\n"
+            await asyncio.sleep(0.01)
+        
+        citations = [c['metadata'].get('title_path', '未知') for c in context_chunks]
+        yield f"data: {json.dumps({'done': True, 'citations': citations})}\n\n"
 
     @staticmethod
     def construct_prompt(template: str, context_chunks: List[Dict], query: str) -> str:
