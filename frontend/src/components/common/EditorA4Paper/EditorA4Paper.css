@@ -14,13 +14,20 @@
   /* 确保缩放后的占位高度正确，这里使用了 min-height 同步 A4 物理高度 */
   min-height: 1123px; 
 }
-
 .a4-paper {
   width: 794px; /* A4 210mm @ 96DPI */
   min-height: 1123px; /* A4 297mm @ 96DPI */
   background: #ffffff;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  /* 极致匠心：阶梯式多重阴影，模拟物理纸张堆叠感 */
+  box-shadow: 
+    0 1px 1px rgba(0,0,0,0.1), 
+    0 2px 2px rgba(0,0,0,0.1), 
+    0 4px 4px rgba(0,0,0,0.1), 
+    0 8px 8px rgba(0,0,0,0.1), 
+    0 16px 16px rgba(0,0,0,0.1);
+  border: 1px solid rgba(0,0,0,0.05);
   margin: 0 auto;
+...
   padding: 72px 90px; /* 近似国标页边距 */
   position: relative;
   /* 字体防御链：方正仿宋优先 */

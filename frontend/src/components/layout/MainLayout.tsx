@@ -1,15 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { Layout, Menu, Space, Badge } from 'antd';
+import { Layout, Menu, Space, Badge, Divider, Typography } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
+import { useEditorStore } from '../../stores/editorStore';
 import { apiClient } from '../../api/client';
+import { countWords } from '../../utils/wordCount';
 
 const { Header, Sider, Content, Footer } = Layout;
+const { Text } = Typography;
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const userInfo = useAuthStore(state => state.userInfo);
+  const content = useEditorStore(state => state.content);
   const [aiStatus, setAiStatus] = useState<'online' | 'offline'>('offline');
 
   useEffect(() => {
@@ -27,6 +31,9 @@ export const MainLayout: React.FC = () => {
     const timer = setInterval(checkStatus, 30000);
     return () => clearInterval(timer);
   }, []);
+
+  const wordCount = countWords(content);
+  const isWorkspace = location.pathname.includes('/workspace');
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -64,15 +71,24 @@ export const MainLayout: React.FC = () => {
             <Outlet />
           </Content>
           <Footer style={{ 
-            textAlign: 'center', height: '24px', padding: '0 16px', 
+            height: '24px', padding: '0 16px', 
             background: '#333', color: '#fff', fontSize: '12px',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center'
           }}>
-            <div>
-               AI 引擎探针: <Badge status={aiStatus === 'online' ? 'success' : 'error'} text={aiStatus === 'online' ? '在线' : '离线'} style={{ color: '#fff' }} />
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+               <Badge status={aiStatus === 'online' ? 'success' : 'error'} />
+               <span style={{ marginLeft: 6, color: '#aaa' }}>AI 探针: {aiStatus === 'online' ? '在线' : '离线'}</span>
+            </div>
+            <div style={{ color: '#888' }}>
+               © 2026 国家统计局泰兴调查队 | 极致匠心 V3.0
             </div>
             <div>
-               © 2026 国家统计局泰兴调查队 | V3.0
+               {isWorkspace && (
+                 <Space split={<Divider type="vertical" style={{ borderColor: '#666' }} />}>
+                   <span style={{ color: '#aaa' }}>A4 物理排版</span>
+                   <span style={{ color: '#1890ff', fontWeight: 'bold' }}>正文计数: {wordCount}</span>
+                 </Space>
+               )}
             </div>
           </Footer>
         </Layout>
