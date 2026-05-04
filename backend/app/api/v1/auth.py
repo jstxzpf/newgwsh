@@ -22,7 +22,8 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
         raise BusinessException(403, "账号已被停用")
         
     # 清除旧会话
-    await db.execute(UserSession.__table__.delete().where(UserSession.user_id == user.user_id))
+    from sqlalchemy import delete
+    await db.execute(delete(UserSession).where(UserSession.user_id == user.user_id))
     
     access_token = create_access_token(subject=user.user_id)
     refresh_token = create_refresh_token(subject=user.user_id)
