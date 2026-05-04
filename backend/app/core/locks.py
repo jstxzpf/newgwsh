@@ -36,3 +36,19 @@ async def extend_redis_lock(doc_id: str, user_id: int, token: str, ttl: int = 18
         except:
             pass
     return False
+
+async def list_all_locks() -> list:
+    keys = await redis_client.keys("lock:*")
+    locks = []
+    for k in keys:
+        val = await redis_client.get(k)
+        if val:
+            try:
+                import json
+                data = json.loads(val)
+                data["doc_id"] = k.split(":")[1]
+                data["ttl"] = await redis_client.ttl(k)
+                locks.append(data)
+            except:
+                pass
+    return locks

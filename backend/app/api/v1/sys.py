@@ -7,7 +7,10 @@ from app.models.system import SystemConfig
 from app.schemas.sys import ConfigUpdateRequest
 from app.core.exceptions import BusinessException
 from app.api.dependencies import get_current_user
+from app.core.locks import list_all_locks
+from app.models.system import NBSWorkflowAudit
 import os
+import json
 
 router = APIRouter()
 
@@ -26,24 +29,52 @@ async def system_status(admin_user: SystemUser = Depends(get_admin_user)):
         "ai_engine_online": True
     }}
 
-@router.put("/config")
-async def update_config(req: ConfigUpdateRequest, admin_user: SystemUser = Depends(get_admin_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(SystemConfig).where(SystemConfig.config_key == req.config_key))
-    cfg = result.scalars().first()
-    if cfg:
-        cfg.config_value = str(req.config_value)
-    else:
-        new_cfg = SystemConfig(config_key=req.config_key, config_value=str(req.config_value))
-        db.add(new_cfg)
-    await db.commit()
-    # TODO: 刷新单例缓存
-    return {"code": 200, "message": "success", "data": None}
+@router.get("/audit")
+async def list_audit_logs(
+    doc_id: str | None = None,
+    operator_id: int | None = None,
+    page: int = 1,
+    db: AsyncSession = Depends(get_db),
+    admin_user: SystemUser = Depends(get_admin_user)
+):
+    query = select(NBSWorkflowAudit).order_by(NBSWorkflowAudit.created_at.desc())
+    if doc_id:
+        query = query.where(NBSWorkflowAudit.doc_id == doc_id)
+    if operator_id:
+        query = query.where(NBSWorkflowAudit.operator_id == operator_id)
+    
+    res = await db.execute(query.limit(50).offset((page-1)*50))
+    items = res.scalars().all()
+    return {"code": 200, "message": "success", "data": [
+        {
+            "audit_id": i.audit_id,
+            "doc_id": i.doc_id,
+            "node": i.workflow_node_id,
+            "operator": i.operator_id,
+            "details": i.action_details,
+            "time": i.created_at
+        } for i in items
+    ]}
 
-@router.post("/reload-prompts")
-async def reload_prompts(admin_user: SystemUser = Depends(get_admin_user)):
-    # 热加载逻辑
-    return {"code": 200, "message": "success", "data": {"reloaded": True}}
+@router.get("/locks")
+async def get_active_locks(admin_user: SystemUser = Depends(get_admin_user)):
+    locks = await list_all_locks()
+    return {"code": 200, "message": "success", "data": locks}
 
-@router.post("/cleanup-cache")
-async def cleanup_cache(admin_user: SystemUser = Depends(get_admin_user)):
-    return {"code": 200, "message": "success", "data": {"cleaned_files": 0}}
+@router.get("/prompt")
+async def get_system_prompt(admin_user: SystemUser = Depends(get_admin_user)):
+    path = os.path.join(os.path.dirname(__file__), "../../prompts/system_chat.txt")
+    if not os.path.exists(path):
+        return {"code": 200, "data": {"content": ""}}
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return {"code": 200, "data": {"content": content}}
+
+@router.post("/prompt")
+async def save_system_prompt(req: dict, admin_user: SystemUser = Depends(get_admin_user)):
+    content = req.get("content", "")
+    path = os.path.join(os.path.dirname(__file__), "../../prompts/system_chat.txt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return {"code": 200, "message": "Prompt 已保存并实时生效"}

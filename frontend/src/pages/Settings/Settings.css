@@ -1,0 +1,31 @@
+.settings-card {
+  min-height: 600px;
+}
+
+.settings-card .ant-tabs-nav {
+  background: #fcfcfc;
+  padding: 12px 0;
+  border-right: 1px solid #f0f0f0;
+}
+
+.tab-pane {
+  padding: 0 24px;
+}
+
+.prompt-editor-pane {
+  padding: 0 24px;
+}
+
+.ant-statistic-title {
+  font-size: 13px;
+  color: #8c8c8c;
+}
+
+.ant-statistic-content {
+  font-weight: 600;
+}
+
+.ant-table-small {
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+}

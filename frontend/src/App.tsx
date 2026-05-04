@@ -17,6 +17,7 @@ import { Documents } from './pages/Documents/Documents';
 import { Knowledge } from './pages/Knowledge/Knowledge';
 import { Approvals } from './pages/Approvals/Approvals';
 import { Chat } from './pages/Chat/Chat';
+import { Settings } from './pages/Settings/Settings';
 
 // 路由守卫组件
 const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -59,7 +60,7 @@ export const App: React.FC = () => {
             <Route path="knowledge" element={<Knowledge />} />
             <Route path="approvals" element={<Approvals />} />
             <Route path="chat" element={<Chat />} />
-            <Route path="settings" element={<div>Settings</div>} />
+            <Route path="settings" element={<Settings />} />
           </Route>
 
           <Route path="/workspace/:doc_id" element={
