@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.core.config import settings
 
 # 异步引擎（供 FastAPI 路由使用）
@@ -31,7 +31,8 @@ SyncSessionLocal = sessionmaker(
     autoflush=False
 )
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 async def get_db() -> AsyncSession: # type: ignore
     async with AsyncSessionLocal() as session:

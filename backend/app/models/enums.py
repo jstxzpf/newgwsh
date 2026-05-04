@@ -16,6 +16,10 @@ class DataSecurityLevel(str, enum.Enum):
     IMPORTANT = "IMPORTANT"
     GENERAL = "GENERAL"
 
+class KBTypeEnum(str, enum.Enum):
+    FILE = "FILE"
+    DIRECTORY = "DIRECTORY"
+
 class DocTypeEnum(str, enum.Enum):
     NOTICE = "NOTICE"
     REQUEST = "REQUEST"
@@ -37,3 +41,10 @@ class TaskStatus(str, enum.Enum):
     PROCESSING = "PROCESSING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+
+class NotificationType(str, enum.Enum):
+    TASK_COMPLETED = "TASK_COMPLETED"
+    TASK_FAILED = "TASK_FAILED"
+    DOC_APPROVED = "DOC_APPROVED"
+    DOC_REJECTED = "DOC_REJECTED"
+    LOCK_RECLAIMED = "LOCK_RECLAIMED"
