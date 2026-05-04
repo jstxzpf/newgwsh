@@ -43,7 +43,17 @@
 
 .workspace-content {
   position: relative;
-  overflow: hidden;
+  overflow: auto;
+  background-color: #f0f2f5;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px 0;
+}
+
+.editor-viewport-inner {
+  display: flex;
+  justify-content: center;
 }
 
 .workspace-loading {

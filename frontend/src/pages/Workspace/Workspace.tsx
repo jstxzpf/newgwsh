@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Layout, Spin, message, Button, Space, Tag, Popconfirm, Modal } from 'antd';
 import { LeftOutlined, SendOutlined, BulbOutlined, DownloadOutlined, HistoryOutlined } from '@ant-design/icons';
@@ -18,7 +18,28 @@ export const Workspace: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [snapshotDrawerOpen, setSnapshotDrawerOpen] = useState(false);
-  
+  const [scale, setScale] = useState(1);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // A4 视口自适应算法 (Task 1)
+  useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current) {
+        const parentWidth = containerRef.current.clientWidth - 48; // 减去 padding
+        const paperWidth = 794; // A4 标准宽度
+        if (parentWidth < paperWidth) {
+          setScale(parentWidth / paperWidth);
+        } else {
+          setScale(1);
+        }
+      }
+    };
+    
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, [loading]);
+
   const { 
     content, setContent, viewMode, setViewMode, 
     isReadOnly, readOnlyReason, setReadOnly,
@@ -201,43 +222,49 @@ export const Workspace: React.FC = () => {
           </div>
         </Sider>
 
-        <Content className="workspace-content">
-          <EditorA4Paper>
-            {viewMode === 'SINGLE' ? (
-              <textarea 
-                className="markdown-editor" 
-                value={content} 
-                onChange={(e) => setContent(e.target.value)}
-                readOnly={isReadOnly}
-                placeholder="在此输入公文正文..."
-              />
-            ) : (
-              <div className="diff-mode-container">
-                <div className="diff-col left">
-                   <div className="diff-label">只读原稿</div>
-                   <textarea className="diff-editor readonly" value={content} readOnly />
+        <Content className="workspace-content" ref={containerRef}>
+          <div className="editor-viewport-inner" style={{ 
+            transform: `scale(${scale})`, 
+            transformOrigin: 'top center',
+            transition: 'transform 0.2s ease-out'
+          }}>
+            <EditorA4Paper>
+              {viewMode === 'SINGLE' ? (
+                <textarea 
+                  className="markdown-editor" 
+                  value={content} 
+                  onChange={(e) => setContent(e.target.value)}
+                  readOnly={isReadOnly}
+                  placeholder="在此输入公文正文..."
+                />
+              ) : (
+                <div className="diff-mode-container">
+                  <div className="diff-col left">
+                    <div className="diff-label">只读原稿</div>
+                    <textarea className="diff-editor readonly" value={content} readOnly />
+                  </div>
+                  <div className="diff-col right">
+                    <div className="diff-label">AI 建议稿 (可修改)</div>
+                    <textarea 
+                        className="diff-editor" 
+                        value={draftSuggestion || ''} 
+                        onChange={(e) => setDraftSuggestion(e.target.value)}
+                    />
+                  </div>
+                  <div className="diff-actions">
+                    <Space size="large">
+                      <Popconfirm title="确认接受 AI 建议？这将会覆盖当前正文。" onConfirm={handleApplyPolish}>
+                        <Button type="primary" size="large" loading={isBusy}>接受并合并</Button>
+                      </Popconfirm>
+                      <Popconfirm title="确认丢弃 AI 建议？" onConfirm={handleDiscardPolish}>
+                        <Button size="large" disabled={isBusy}>丢弃建议</Button>
+                      </Popconfirm>
+                    </Space>
+                  </div>
                 </div>
-                <div className="diff-col right">
-                   <div className="diff-label">AI 建议稿 (可修改)</div>
-                   <textarea 
-                      className="diff-editor" 
-                      value={draftSuggestion || ''} 
-                      onChange={(e) => setDraftSuggestion(e.target.value)}
-                   />
-                </div>
-                <div className="diff-actions">
-                   <Space size="large">
-                     <Popconfirm title="确认接受 AI 建议？这将会覆盖当前正文。" onConfirm={handleApplyPolish}>
-                       <Button type="primary" size="large" loading={isBusy}>接受并合并</Button>
-                     </Popconfirm>
-                     <Popconfirm title="确认丢弃 AI 建议？" onConfirm={handleDiscardPolish}>
-                       <Button size="large" disabled={isBusy}>丢弃建议</Button>
-                     </Popconfirm>
-                   </Space>
-                </div>
-              </div>
-            )}
-          </EditorA4Paper>
+              )}
+            </EditorA4Paper>
+          </div>
         </Content>
       </Layout>
 
