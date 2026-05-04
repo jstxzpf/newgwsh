@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # 1. 核心数据库：PostgreSQL 16 + pgvector ( Task 4 )
+  db:
+    image: pgvector/pgvector:pg16
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taixing_nbs_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-newgwsh_prod}
+    volumes:
+      - pg_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
+
+  # 2. 高并发锁控中枢：Redis 7.2 ( §二.3 )
+  redis:
+    image: redis:7.2-alpine
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_prod_data:/data
+    networks:
+      - backend_net
+
+  # 3. 业务 API 引擎 ( Controller )
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taixing_nbs_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-newgwsh_prod}
+      REDIS_URL: redis://redis:6379/0
+      SIP_SECRET_KEY: ${SIP_SECRET_KEY:-TX_NBS_SECRET_999}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://10.132.60.111:11434}
+    volumes:
+      - ./backend/app/prompts:/app/app/prompts:ro # 提示词挂载 (ro 保护)
+      - archive_prod:/app/archives
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - backend_net
+
+  # 4. 异步排版与润色 Worker ( §七.2 )
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.tasks.worker worker --loglevel=info --concurrency=4
+    restart: always
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://10.132.60.111:11434}
+    volumes:
+      - archive_prod:/app/archives
+    depends_on:
+      - db
+      - redis
+    networks:
+      - backend_net
+
+  # 5. 前端分发与反向代理 ( §三.7 )
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+    networks:
+      - backend_net
+
+networks:
+  backend_net:
+    driver: bridge
+
+volumes:
+  pg_prod_data:
+  redis_prod_data:
+  archive_prod:
