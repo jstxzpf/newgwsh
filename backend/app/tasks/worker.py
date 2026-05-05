@@ -48,7 +48,8 @@ def process_polish_task(self, task_id: str, doc_id: str):
                         ).limit(10)
                     ).scalars().all()
                     for c in chunks:
-                        context_parts.append(f"[来源: {c.metadata_json.get('title_path', '未知')}]\n{c.content}")
+                        meta = c.metadata_json or {}
+                        context_parts.append(f"[来源: {meta.get('title_path', '未知')}]\n{c.content}")
 
                 # 加载范文
                 if exemplar_id:
@@ -66,7 +67,7 @@ def process_polish_task(self, task_id: str, doc_id: str):
             else:
                 template = "请润色以下公文：\n{content}\n\n参考上下文：{context}\n\n润色后正文："
 
-            prompt = template.format(content=doc_content, context=context_str)
+            prompt = template.replace("{content}", doc_content).replace("{context}", context_str)
 
             # 3. 调用 Ollama（事务外，不持数据库锁）
             _publish_progress(task_id, 30, "正在调用 AI 模型...")
@@ -97,6 +98,9 @@ def process_polish_task(self, task_id: str, doc_id: str):
 
         except Exception as e:
             session.rollback()
+            if self.request.retries >= self.max_retries:
+                _mark_task_failed(session, task_id, f"任务异常: {str(e)}")
+                return
             raise self.retry(exc=e)
 
 @celery_app.task(bind=True, max_retries=3)
@@ -150,9 +154,12 @@ def process_parse_task(self, kb_id: int, task_id: str = None):
 
                 chunk = KnowledgeChunk(
                     kb_id=kb_node.kb_id,
+                    physical_file_id=kb_node.physical_file_id, # Added missing field
+                    chunk_index=0, # Added missing field
+                    kb_tier=kb_node.kb_tier, # Added missing field
                     content=content,
                     security_level=kb_node.security_level,
-                    metadata_json={"title_path": kb_node.node_name},
+                    metadata_json={"title_path": kb_node.kb_name},
                     embedding=None # 模拟向量
                 )
                 session.add(chunk)

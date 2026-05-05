@@ -35,7 +35,19 @@ class KnowledgeService:
             db.add(physical_file)
             await db.flush()
         
-        # 2. 安全等级一致性校验 (§三.2 铁律)
+        # 2. 逻辑去重检查 (§三.5)
+        # 铁律：防止相同用户在相同层级重复挂载相同物理文件引发 idx_kb_personal_unique 冲突
+        existing_node_query = select(KnowledgeBaseHierarchy).where(
+            KnowledgeBaseHierarchy.physical_file_id == physical_file.file_id,
+            KnowledgeBaseHierarchy.owner_id == user_id,
+            KnowledgeBaseHierarchy.kb_tier == kb_tier,
+            KnowledgeBaseHierarchy.is_deleted == False
+        )
+        existing_node = (await db.execute(existing_node_query)).scalars().first()
+        if existing_node:
+            return existing_node.kb_id
+
+        # 3. 安全等级一致性校验 (§三.2 铁律)
         # 检查是否有现成的 Ready 切片且安全等级一致
         reuse_possible = False
         existing_chunks_query = select(KnowledgeChunk).where(
@@ -48,7 +60,7 @@ class KnowledgeService:
         if existing_chunk:
             reuse_possible = True
 
-        # 3. 创建逻辑节点
+        # 4. 创建逻辑节点
         new_node = KnowledgeBaseHierarchy(
             kb_name=filename,
             kb_type=KBTypeEnum.FILE,
@@ -63,10 +75,6 @@ class KnowledgeService:
         db.add(new_node)
         await db.flush()
         
-        if reuse_possible:
-            # 执行切片复用关联 (逻辑层完成，不复制物理数据)
-            pass 
-
         return new_node.kb_id
 
     @staticmethod

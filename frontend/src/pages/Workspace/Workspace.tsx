@@ -25,6 +25,7 @@ export const Workspace: React.FC = () => {
   const addTask = useTaskStore(state => state.addTask);
   const taskResults = useTaskStore(state => state.taskResults);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const polishTimeoutRef = useRef<number | null>(null);
 
   // A4 视口自适应算法 (Task 1)
   useEffect(() => {
@@ -80,13 +81,23 @@ export const Workspace: React.FC = () => {
   useEffect(() => {
     if (!doc_id) return;
     fetchDoc();
-    return () => resetEditor();
+    return () => {
+      resetEditor();
+      if (polishTimeoutRef.current) {
+        clearTimeout(polishTimeoutRef.current);
+        polishTimeoutRef.current = null;
+      }
+    };
   }, [doc_id]);
 
   // 监听异步任务完成 (Task 2 & 4)
   useEffect(() => {
     if (currentTaskId && taskResults[currentTaskId]) {
       const result = taskResults[currentTaskId];
+      if (polishTimeoutRef.current) {
+        clearTimeout(polishTimeoutRef.current);
+        polishTimeoutRef.current = null;
+      }
       if (result.event === 'task.completed' || result.task_status === 'COMPLETED') {
         fetchDoc().then(() => {
           message.success('AI 润色已就绪');
@@ -136,11 +147,18 @@ export const Workspace: React.FC = () => {
         context_snapshot_version: snapshotVersion,
         exemplar_id: exemplarId
       });
-      
+
       const taskId = res.data.data.task_id;
       addTask(taskId);
       setCurrentTaskId(taskId);
       message.info('AI 润色任务已派发，请稍候...');
+
+      // 5 分钟超时兜底
+      polishTimeoutRef.current = window.setTimeout(() => {
+        message.error('AI 润色超时，请检查服务状态后重试');
+        setBusy(false);
+        setCurrentTaskId(null);
+      }, 300000);
     } catch (e) {
       setBusy(false);
     }

@@ -9,7 +9,7 @@ from app.core.config import settings
 OLLAMA_GENERATE = f"{settings.OLLAMA_BASE_URL}/api/generate"
 
 
-def generate_sync(prompt: str, model: str = "qwen2.5:7b", timeout: int = 120) -> str:
+def generate_sync(prompt: str, model: str = "qwen2.5:7b", timeout: int = 180) -> str:
     """Synchronous generate — used by Celery worker."""
     with httpx.Client(timeout=timeout) as client:
         resp = client.post(OLLAMA_GENERATE, json={
@@ -22,7 +22,7 @@ def generate_sync(prompt: str, model: str = "qwen2.5:7b", timeout: int = 120) ->
         return resp.json()["response"]
 
 
-async def generate_async(prompt: str, model: str = "qwen2.5:7b", timeout: int = 120) -> str:
+async def generate_async(prompt: str, model: str = "qwen3.5:9b", timeout: int = 120) -> str:
     """Async generate — used by RRAG / chat endpoints."""
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(OLLAMA_GENERATE, json={
@@ -35,7 +35,7 @@ async def generate_async(prompt: str, model: str = "qwen2.5:7b", timeout: int = 
         return resp.json()["response"]
 
 
-async def stream_generate(prompt: str, model: str = "qwen2.5:7b", timeout: int = 120):
+async def stream_generate(prompt: str, model: str = "qwen3.5:9b", timeout: int = 120):
     """Async streaming generator — yields token strings."""
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", OLLAMA_GENERATE, json={

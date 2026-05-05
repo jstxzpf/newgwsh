@@ -37,28 +37,53 @@ async def task_events(request: Request, task_id: str, ticket: str = Query(...), 
         raise BusinessException(403, "无效或已过期的票据")
         
     async def event_generator():
-        # 1. 先检查数据库状态，防止错过已完成的任务 (Race Condition Fix)
-        result = await db.execute(select(AsyncTask).where(AsyncTask.task_id == task_id))
-        task = result.scalars().first()
-        if task:
-            if task.task_status == TaskStatus.COMPLETED:
-                yield f"event: task.completed\ndata: {json.dumps({'event': 'task.completed', 'task_id': task_id, 'result_summary': task.result_summary})}\n\n"
-                return
-            elif task.task_status == TaskStatus.FAILED:
-                yield f"event: task.failed\ndata: {json.dumps({'event': 'task.failed', 'task_id': task_id, 'error_message': task.error_message})}\n\n"
-                return
-
         pubsub = redis_client.pubsub()
         await pubsub.subscribe(f"task_events:{task_id}")
         try:
+            # 1. 先订阅 Redis，再查 DB，消除竞态窗口：
+            #    - 若任务在订阅前已完成 → DB 可查到 → 立即返回
+            #    - 若任务在订阅后完成 → Redis 会投递事件
+            result = await db.execute(select(AsyncTask).where(AsyncTask.task_id == task_id))
+            task = result.scalars().first()
+            if task:
+                if task.task_status == TaskStatus.COMPLETED:
+                    yield f"event: task.completed\ndata: {json.dumps({'event': 'task.completed', 'task_id': task_id, 'result_summary': task.result_summary})}\n\n"
+                    return
+                elif task.task_status == TaskStatus.FAILED:
+                    yield f"event: task.failed\ndata: {json.dumps({'event': 'task.failed', 'task_id': task_id, 'error_message': task.error_message})}\n\n"
+                    return
+
+            idle_seconds = 0
+            max_idle = 30       # 30s 无事件则重查 DB
+            max_lifetime = 300  # 300s 后主动关闭
+
             while True:
                 if await request.is_disconnected():
                     break
+
+                if idle_seconds >= max_lifetime:
+                    break
+
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 if message and message['type'] == 'message':
                     data_obj = json.loads(message['data'])
                     event_type = data_obj.get("event", "task.progress")
                     yield f"event: {event_type}\ndata: {message['data']}\n\n"
+                    idle_seconds = 0
+                else:
+                    idle_seconds += 1
+                    # 每 30s 重查 DB，防止 Redis 事件丢失导致永久等待
+                    if idle_seconds > 0 and idle_seconds % max_idle == 0:
+                        result = await db.execute(select(AsyncTask).where(AsyncTask.task_id == task_id))
+                        task = result.scalars().first()
+                        if task:
+                            if task.task_status == TaskStatus.COMPLETED:
+                                yield f"event: task.completed\ndata: {json.dumps({'event': 'task.completed', 'task_id': task_id, 'result_summary': task.result_summary})}\n\n"
+                                return
+                            elif task.task_status == TaskStatus.FAILED:
+                                yield f"event: task.failed\ndata: {json.dumps({'event': 'task.failed', 'task_id': task_id, 'error_message': task.error_message})}\n\n"
+                                return
+
                 await asyncio.sleep(0.1)
         finally:
             await pubsub.unsubscribe(f"task_events:{task_id}")
