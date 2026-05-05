@@ -1,0 +1,110 @@
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*.tmp
+
+# --- IDE Files ---
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# --- Environment Variables ---
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+# --- Node.js / Frontend ---
+node_modules/
+dist/
+dist-ssr/
+*.local
+.npm/
+.eslintcache
+.stylelintcache
+.prettiercache
+.parcel-cache
+.cache/
+.next/
+.vite/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Python / Backend ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.nox/
+.tox/
+.venv
+venv/
+ENV/
+instance/
+.webassets-cache
+.scrapy
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+
+# --- Docker ---
+.docker-compose.yml.swp
+
+# --- Databases ---
+*.db
+*.sqlite3
+
+# --- Logs and Reports ---
+*.log
+logs/
+audit_report_*.json
+debug_page.json
+login_debug.json
+login_dom.txt
+
+# --- Test Data ---
+test_exemplar.docx
+test_kb_file.txt
+
+# --- Gemini CLI / Agent Specific ---
+# We want to commit GEMINI.md and instructions but ignore transient session state
+.agents/tmp/
+.gemini/tmp/
+.claude/
+.qwen/
+.trae/
+skills-lock.json

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Card, Row, Col, Statistic, List, Badge, Button, Typography, Space } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Card, Row, Col, Statistic, List, Badge, Button, Typography, Space, Modal, Form, Input, Select } from 'antd';
 import { 
   FileTextOutlined, 
   CheckCircleOutlined, 
@@ -7,19 +7,52 @@ import {
   ExclamationCircleOutlined,
   PlusOutlined
 } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
+import { apiClient } from '../../api/client';
 
 const { Title } = Typography;
 
 export const Dashboard: React.FC = () => {
   const userInfo = useAuthStore(state => state.userInfo);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [form] = Form.useForm();
+  const navigate = useNavigate();
+  const [statsData, setStatsData] = useState({ drafted: 0, submitted: 0, rejected: 0, approved: 0 });
+  const [recentDocs, setRecentDocs] = useState<any[]>([]);
 
-  // 模拟数据（后续对接 API）
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [statsRes, docsRes] = await Promise.all([
+          apiClient.get('/documents/dashboard/stats'),
+          apiClient.get('/documents?page=1&page_size=5')
+        ]);
+        setStatsData(statsRes.data.data);
+        setRecentDocs(docsRes.data.data.items);
+      } catch (e) {
+        console.error("Failed to fetch dashboard data", e);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const handleCreate = async (values: any) => {
+    try {
+      const res = await apiClient.post('/documents/init', values);
+      const docId = res.data.data.doc_id;
+      setIsModalOpen(false);
+      navigate(`/workspace/${docId}`);
+    } catch (e) {
+      // 错误已由拦截器处理
+    }
+  };
+
   const stats = [
-    { title: '我起草的', value: 12, icon: <FileTextOutlined />, color: '#1890ff' },
-    { title: '待签批', value: 3, icon: <ClockCircleOutlined />, color: '#faad14' },
-    { title: '被驳回', value: 1, icon: <ExclamationCircleOutlined />, color: '#ff4d4f' },
-    { title: '已归档', value: 45, icon: <CheckCircleOutlined />, color: '#52c41a' },
+    { title: '我起草的', value: statsData.drafted, icon: <FileTextOutlined />, color: '#1890ff' },
+    { title: '待签批', value: statsData.submitted, icon: <ClockCircleOutlined />, color: '#faad14' },
+    { title: '被驳回', value: statsData.rejected, icon: <ExclamationCircleOutlined />, color: '#ff4d4f' },
+    { title: '已归档', value: statsData.approved, icon: <CheckCircleOutlined />, color: '#52c41a' },
   ];
 
   return (
@@ -29,10 +62,37 @@ export const Dashboard: React.FC = () => {
           <Title level={2} style={{ margin: 0 }}>你好，{userInfo?.full_name}</Title>
           <Typography.Text type="secondary">{userInfo?.department_name} | {userInfo?.role_level === 99 ? '系统管理员' : '公文处理员'}</Typography.Text>
         </div>
-        <Button type="primary" size="large" icon={<PlusOutlined />} style={{ height: '48px', padding: '0 32px' }}>
+        <Button 
+          type="primary" 
+          size="large" 
+          icon={<PlusOutlined />} 
+          style={{ height: '48px', padding: '0 32px' }}
+          onClick={() => setIsModalOpen(true)}
+        >
           起草新公文
         </Button>
       </div>
+
+      <Modal
+        title="起草新公文"
+        open={isModalOpen}
+        onOk={() => form.submit()}
+        onCancel={() => setIsModalOpen(false)}
+        destroyOnClose
+      >
+        <Form form={form} layout="vertical" onFinish={handleCreate}>
+          <Form.Item name="title" label="公文标题" rules={[{ required: true, message: '请输入标题' }]}>
+            <Input placeholder="请输入公文标题" />
+          </Form.Item>
+          <Form.Item name="doc_type_id" label="文种类型" rules={[{ required: true, message: '请选择文种' }]}>
+            <Select placeholder="请选择文种">
+              <Select.Option value={1}>通知</Select.Option>
+              <Select.Option value={2}>报告</Select.Option>
+              <Select.Option value={3}>请示</Select.Option>
+            </Select>
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Row gutter={16}>
         {stats.map((item, index) => (
@@ -50,21 +110,18 @@ export const Dashboard: React.FC = () => {
 
       <Row gutter={24} style={{ marginTop: '24px' }}>
         <Col span={16}>
-          <Card title="最近起草" extra={<a href="/documents">查看全部</a>}>
+          <Card title="最近起草" extra={<a href="/documents" onClick={(e) => { e.preventDefault(); navigate('/documents'); }}>查看全部</a>}>
             <List
               itemLayout="horizontal"
-              dataSource={[
-                { title: '关于2024年一季度统计数据核查的通知', status: 'DRAFTING', time: '2小时前' },
-                { title: '泰兴队2024年安全生产工作计划', status: 'SUBMITTED', time: '昨天' },
-              ]}
+              dataSource={recentDocs}
               renderItem={item => (
-                <List.Item actions={[<Button type="link">继续编辑</Button>]}>
+                <List.Item actions={[<Button type="link" onClick={() => navigate(`/workspace/${item.doc_id}`)}>继续编辑</Button>]}>
                   <List.Item.Meta
                     title={item.title}
                     description={
                       <Space>
-                        <Badge status={item.status === 'DRAFTING' ? 'processing' : 'warning'} text={item.status === 'DRAFTING' ? '起草中' : '审核中'} />
-                        <Typography.Text type="disabled">{item.time}</Typography.Text>
+                        <Badge status={item.status === 'DRAFTING' ? 'processing' : (item.status === 'SUBMITTED' ? 'warning' : 'default')} text={item.status === 'DRAFTING' ? '起草中' : (item.status === 'SUBMITTED' ? '审核中' : item.status)} />
+                        <Typography.Text type="secondary">{new Date(item.created_at).toLocaleString()}</Typography.Text>
                       </Space>
                     }
                   />

@@ -90,7 +90,7 @@ class KnowledgeService:
         if not target_ids:
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         
         # 2. 批量更新逻辑树
         await db.execute(

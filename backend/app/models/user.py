@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from app.core.database import Base
+from datetime import datetime
 
 class Department(Base):
     __tablename__ = "departments"
@@ -30,7 +31,7 @@ class SystemUser(Base):
     # Relationships
     department = relationship("Department", back_populates="members", foreign_keys=[dept_id])
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
-    documents = relationship("Document", back_populates="creator")
+    documents = relationship("Document", back_populates="creator", foreign_keys="Document.creator_id")
 
 class UserSession(Base):
     __tablename__ = "users_sessions"

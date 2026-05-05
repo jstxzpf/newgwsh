@@ -7,36 +7,41 @@ export const GlobalTaskWatcher: React.FC = () => {
   const activeTaskIds = useTaskStore(state => state.activeTaskIds);
   const removeTask = useTaskStore(state => state.removeTask);
   const setTaskResult = useTaskStore(state => state.setTaskResult);
-  const connectionsRef = useRef<Record<string, { es: EventSource; retryCount: number; timer?: number }>>({});
+  const connectionsRef = useRef<Record<string, { es: EventSource; retryCount: number; timer?: number; finished: boolean }>>({});
 
   const connect = async (taskId: string) => {
     // 铁律：最大并发连接池限制 (§五.3)
     if (Object.keys(connectionsRef.current).length >= 5) {
-      console.warn("SSE pool full, queuing task:", taskId);
       return;
     }
     
-    if (connectionsRef.current[taskId]?.es) return;
+    if (connectionsRef.current[taskId]?.es || connectionsRef.current[taskId]?.finished) return;
 
     try {
       const ticketRes = await apiClient.post('/sse/ticket', { task_id: taskId });
       const ticket = ticketRes.data.data.ticket;
 
       const es = new EventSource(`/api/v1/sse/${taskId}/events?ticket=${ticket}`);
-      const connection = connectionsRef.current[taskId] || { es, retryCount: 0 };
+      const connection = connectionsRef.current[taskId] || { es, retryCount: 0, finished: false };
       connection.es = es;
+      connection.finished = false;
       connectionsRef.current[taskId] = connection;
 
       es.addEventListener('task.completed', (e: any) => {
+        if (connection.finished) return;
         const data = JSON.parse(e.data);
         notification.success({ message: '任务完成', description: `业务处理已成功` });
         setTaskResult(taskId, data);
+        connection.finished = true;
         cleanup(taskId);
       });
 
       es.addEventListener('task.failed', (e: any) => {
+        if (connection.finished) return;
         const data = JSON.parse(e.data);
         notification.error({ message: '任务失败', description: data.error_message });
+        setTaskResult(taskId, data);
+        connection.finished = true;
         cleanup(taskId);
       });
 
@@ -46,8 +51,9 @@ export const GlobalTaskWatcher: React.FC = () => {
       });
 
       es.onerror = () => {
-        // 铁律：立即关闭阻断原生重连 (§五.3)
         es.close();
+        if (connection.finished) return;
+        
         connection.es = null;
         if (connection.retryCount < 3) {
           connection.retryCount++;
@@ -64,12 +70,15 @@ export const GlobalTaskWatcher: React.FC = () => {
   };
 
   const startPolling = (taskId: string) => {
+    const conn = connectionsRef.current[taskId];
     const poll = async () => {
+      if (conn?.finished) return;
       try {
         const res = await apiClient.get(`/tasks/${taskId}`);
         const data = res.data.data;
         if (data.task_status === 'COMPLETED' || data.task_status === 'FAILED') {
           setTaskResult(taskId, data);
+          if (conn) conn.finished = true;
           cleanup(taskId);
         } else {
           window.setTimeout(poll, 5000);
@@ -86,17 +95,22 @@ export const GlobalTaskWatcher: React.FC = () => {
     if (conn) {
       if (conn.es) conn.es.close();
       if (conn.timer) clearTimeout(conn.timer);
-      delete connectionsRef.current[taskId];
+      // 注意：不立即从 connectionsRef 删除，防止 activeTaskIds 变化导致的重连
     }
     removeTask(taskId);
     
-    // 释放位置后尝试连接等待中的任务
-    const nextTask = activeTaskIds.find(id => !connectionsRef.current[id]);
-    if (nextTask) connect(nextTask);
+    // 延时清理连接引用
+    setTimeout(() => {
+      delete connectionsRef.current[taskId];
+    }, 5000);
   };
 
   useEffect(() => {
-    activeTaskIds.forEach(taskId => connect(taskId));
+    activeTaskIds.forEach(taskId => {
+      if (!connectionsRef.current[taskId]) {
+        connect(taskId);
+      }
+    });
   }, [activeTaskIds]);
 
   return null;

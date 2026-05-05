@@ -6,11 +6,9 @@ import { useEditorStore } from '../../../stores/editorStore';
 export const ExemplarPanel: React.FC = () => {
   const [exemplars, setExemplars] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const { docTypeId, exemplarId, setExemplarId } = useEditorStore(state => ({
-    docTypeId: state.docTypeId,
-    exemplarId: state.exemplarId,
-    setExemplarId: (id: number | null) => (useEditorStore.setState({ exemplarId: id }))
-  }));
+  const docTypeId = useEditorStore(state => state.docTypeId);
+  const exemplarId = useEditorStore(state => state.exemplarId);
+  const setExemplarId = (id: number | null) => useEditorStore.setState({ exemplarId: id });
 
   useEffect(() => {
     const fetchExemplars = async () => {

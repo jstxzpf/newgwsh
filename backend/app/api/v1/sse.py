@@ -1,11 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.core.database import get_db
 from app.models.user import SystemUser
+from app.models.system import AsyncTask
+from app.models.enums import TaskStatus
 from app.schemas.sse import TicketRequest
 from app.core.exceptions import BusinessException
 from app.api.dependencies import get_current_user
 from app.core.sse_utils import generate_sse_ticket, consume_sse_ticket, verify_task_owner
 import asyncio
+import json
 from app.core.locks import redis_client
 
 router = APIRouter()
@@ -25,12 +31,23 @@ async def get_ticket(req: TicketRequest, current_user: SystemUser = Depends(get_
     return {"code": 200, "message": "success", "data": {"ticket": ticket}}
 
 @router.get("/{task_id}/events")
-async def task_events(request: Request, task_id: str, ticket: str = Query(...)):
+async def task_events(request: Request, task_id: str, ticket: str = Query(...), db: AsyncSession = Depends(get_db)):
     ticket_data = await consume_sse_ticket(ticket)
     if not ticket_data or ticket_data.get("task_id") != task_id:
         raise BusinessException(403, "无效或已过期的票据")
         
     async def event_generator():
+        # 1. 先检查数据库状态，防止错过已完成的任务 (Race Condition Fix)
+        result = await db.execute(select(AsyncTask).where(AsyncTask.task_id == task_id))
+        task = result.scalars().first()
+        if task:
+            if task.task_status == TaskStatus.COMPLETED:
+                yield f"event: task.completed\ndata: {json.dumps({'event': 'task.completed', 'task_id': task_id, 'result_summary': task.result_summary})}\n\n"
+                return
+            elif task.task_status == TaskStatus.FAILED:
+                yield f"event: task.failed\ndata: {json.dumps({'event': 'task.failed', 'task_id': task_id, 'error_message': task.error_message})}\n\n"
+                return
+
         pubsub = redis_client.pubsub()
         await pubsub.subscribe(f"task_events:{task_id}")
         try:

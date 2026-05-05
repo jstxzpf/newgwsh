@@ -22,6 +22,22 @@ async def trigger_polish(req: PolishTaskRequest, current_user: SystemUser = Depe
     
     return {"code": 202, "message": "accepted", "data": {"task_id": task_id}}
 
+@router.post("/format")
+async def trigger_format(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    task_id = await TaskService.trigger_format_task(db, doc_id, current_user.user_id)
+    await db.commit()
+    await redis_client.set(f"task_owner:{task_id}", current_user.user_id, ex=86400)
+    return {"code": 202, "message": "accepted", "data": {"task_id": task_id}}
+
+@router.post("/{task_id}/retry")
+async def retry_task(task_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if current_user.role_level < 99:
+        raise BusinessException(403, "仅管理员可重试任务")
+        
+    await TaskService.retry_failed_task(db, task_id)
+    await db.commit()
+    return {"code": 200, "message": "任务已重新入队", "data": None}
+
 @router.get("/{task_id}")
 async def get_task_status(task_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(AsyncTask).where(AsyncTask.task_id == task_id))

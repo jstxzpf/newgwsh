@@ -1,18 +1,20 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from app.core.database import get_db
 from app.models.user import SystemUser
-from app.models.document import Document, DocumentSnapshot
+from app.models.document import Document, DocumentSnapshot, DocumentType
 from app.schemas.document import DocumentInitRequest, AutoSaveRequest, ApplyPolishRequest, SnapshotCreateRequest
 from app.core.exceptions import BusinessException
 from app.api.dependencies import get_current_user
 from app.services.document_service import DocumentService
 from app.services.lock_service import LockService
+from app.core.locks import redis_client
+import json
 
 router = APIRouter()
 
-@router.get("/")
+@router.get("")
 async def list_documents(
     status: str | None = None,
     dept_id: int | None = None,
@@ -41,12 +43,17 @@ async def list_documents(
     if dept_id:
         query = query.where(Document.dept_id == dept_id)
 
-    # 分页
+    # 统计总数
     total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar() or 0
     
-    result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
-    items = result.scalars().all()
+    # 加入文种名称和起草人名称
+    query = query.join(DocumentType, Document.doc_type_id == DocumentType.type_id) \
+                 .join(SystemUser, Document.creator_id == SystemUser.user_id) \
+                 .add_columns(DocumentType.type_name, SystemUser.full_name)
+    
+    result = await db.execute(query.order_by(Document.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+    items = result.all()
     
     return {
         "code": 200, 
@@ -55,12 +62,44 @@ async def list_documents(
             "total": total,
             "items": [
                 {
-                    "doc_id": doc.doc_id,
-                    "title": doc.title,
-                    "status": doc.status,
-                    "created_at": doc.created_at
-                } for doc in items
+                    "doc_id": row.Document.doc_id,
+                    "title": row.Document.title,
+                    "status": row.Document.status,
+                    "doc_type_name": row.type_name,
+                    "creator_name": row.full_name,
+                    "created_at": row.Document.created_at
+                } for row in items
             ]
+        }
+    }
+
+@router.get("/dashboard/stats")
+async def get_dashboard_stats(current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    query = select(Document.status, func.count()).where(Document.is_deleted == False)
+    
+    if current_user.role_level < 99:
+        if current_user.role_level >= 5:
+            query = query.where(Document.dept_id == current_user.dept_id)
+        else:
+            query = query.where(Document.creator_id == current_user.user_id)
+            
+    query = query.group_by(Document.status)
+    result = await db.execute(query)
+    counts = dict(result.all())
+    
+    # 还需要"我起草的"总数
+    drafted_query = select(func.count()).where(Document.creator_id == current_user.user_id, Document.is_deleted == False)
+    drafted_result = await db.execute(drafted_query)
+    drafted_count = drafted_result.scalar() or 0
+    
+    return {
+        "code": 200,
+        "message": "success",
+        "data": {
+            "drafted": drafted_count,
+            "submitted": counts.get("SUBMITTED", 0),
+            "rejected": counts.get("REJECTED", 0),
+            "approved": counts.get("APPROVED", 0)
         }
     }
 
@@ -72,10 +111,17 @@ async def init_document(req: DocumentInitRequest, current_user: SystemUser = Dep
 
 @router.get("/{doc_id}")
 async def get_document(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Document).where(Document.doc_id == doc_id, Document.is_deleted == False))
-    doc = result.scalars().first()
-    if not doc:
+    query = select(Document, DocumentType.type_name, SystemUser.full_name) \
+            .join(DocumentType, Document.doc_type_id == DocumentType.type_id) \
+            .join(SystemUser, Document.creator_id == SystemUser.user_id) \
+            .where(Document.doc_id == doc_id, Document.is_deleted == False)
+            
+    result = await db.execute(query)
+    row = result.first()
+    if not row:
         raise BusinessException(404, "公文不存在")
+        
+    doc = row.Document
     return {
         "code": 200, 
         "message": "success", 
@@ -85,6 +131,8 @@ async def get_document(doc_id: str, current_user: SystemUser = Depends(get_curre
             "content": doc.content,
             "status": doc.status,
             "doc_type_id": doc.doc_type_id,
+            "doc_type_name": row.type_name,
+            "creator_name": row.full_name,
             "ai_polished_content": doc.ai_polished_content,
             "draft_suggestion": doc.draft_suggestion
         }
@@ -110,11 +158,20 @@ async def submit_document(doc_id: str, current_user: SystemUser = Depends(get_cu
     if not doc:
         raise BusinessException(404, "公文不存在")
     
-    await DocumentService.submit_document(db, doc, current_user.user_id)
-    # 提交后自动释放锁
-    await LockService.release_lock(db, doc_id, current_user.user_id, token="") # 逻辑内部会检查
+    lock_key = f"lock:{doc_id}"
+    lock_val = await redis_client.get(lock_key)
+    if lock_val:
+        lock_data = json.loads(lock_val)
+        if lock_data.get("user_id") != current_user.user_id:
+            raise BusinessException(409, "已有他人占锁，提交失败")
+    else:
+        if current_user.user_id != doc.creator_id and current_user.role_level < 99:
+            raise BusinessException(403, "锁已释放且无权提交他人公文")
+
+    log_id = await DocumentService.submit_document(db, doc, current_user.user_id)
+    await redis_client.delete(lock_key)
     await db.commit()
-    return {"code": 200, "message": "success", "data": {"doc_id": doc_id, "status": "SUBMITTED"}}
+    return {"code": 200, "message": "success", "data": {"doc_id": doc_id, "status": "SUBMITTED", "log_id": log_id}}
 
 @router.post("/{doc_id}/revise")
 async def revise_document(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
@@ -160,10 +217,43 @@ async def create_snapshot(doc_id: str, req: SnapshotCreateRequest, current_user:
     await db.commit()
     return {"code": 200, "message": "success", "data": {"snapshot_id": sid}}
 
+@router.delete("/{doc_id}")
+async def delete_document(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Document).where(Document.doc_id == doc_id))
+    doc = result.scalars().first()
+    if not doc:
+        raise BusinessException(404, "公文不存在")
+    if current_user.user_id != doc.creator_id and current_user.role_level < 99:
+        raise BusinessException(403, "无权删除他人公文")
+    doc.is_deleted = True
+    await redis_client.delete(f"lock:{doc_id}")
+    await db.commit()
+    return {"code": 200, "message": "success", "data": None}
+
+@router.get("/{doc_id}/download")
+async def download_document(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Document).where(Document.doc_id == doc_id))
+    doc = result.scalars().first()
+    if not doc or not doc.word_output_path:
+        raise BusinessException(404, "排版文件尚未生成")
+    from fastapi.responses import FileResponse
+    return FileResponse(doc.word_output_path, media_type="application/octet-stream", filename=f"{doc.title}.docx")
+
+@router.post("/{doc_id}/snapshots/{snapshot_id}/restore")
+async def restore_snapshot(doc_id: str, snapshot_id: int, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Document).where(Document.doc_id == doc_id))
+    doc = result.scalars().first()
+    if not doc:
+        raise BusinessException(404, "公文不存在")
+    snap_result = await db.execute(select(DocumentSnapshot).where(DocumentSnapshot.snapshot_id == snapshot_id, DocumentSnapshot.doc_id == doc_id))
+    snap = snap_result.scalars().first()
+    if not snap:
+        raise BusinessException(404, "快照不存在")
+    doc.content = snap.content
+    await db.commit()
+    return {"code": 200, "message": "success", "data": None}
+
 @router.get("/{doc_id}/verify-sip")
 async def verify_document_sip(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    # 权限校验略：一般具备审计权
     res = await DocumentService.verify_sip(db, doc_id)
     return {"code": 200, "message": "success", "data": res}
-
-from sqlalchemy import func

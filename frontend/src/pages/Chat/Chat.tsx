@@ -7,7 +7,7 @@ import { useEditorStore } from '../../stores/editorStore';
 import './Chat.css';
 
 const { Sider, Content } = Layout;
-const { Text, Paragraph } = Typography;
+const { Text, Paragraph, Title } = Typography;
 
 interface Message {
   role: 'user' | 'assistant';

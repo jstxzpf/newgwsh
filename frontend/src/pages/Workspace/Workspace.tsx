@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Layout, Spin, message, Button, Space, Tag, Popconfirm, Modal } from 'antd';
 import { LeftOutlined, SendOutlined, BulbOutlined, DownloadOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useEditorStore } from '../../stores/editorStore';
+import { useTaskStore } from '../../stores/taskStore';
 import { useLockGuard } from '../../hooks/useLockGuard';
 import { apiClient } from '../../api/client';
 import { EditorA4Paper } from '../../components/common/EditorA4Paper/EditorA4Paper';
@@ -20,6 +21,10 @@ export const Workspace: React.FC = () => {
   const [snapshotDrawerOpen, setSnapshotDrawerOpen] = useState(false);
   const [scale, setScale] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const addTask = useTaskStore(state => state.addTask);
+  const taskResults = useTaskStore(state => state.taskResults);
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
 
   // A4 视口自适应算法 (Task 1)
   useEffect(() => {
@@ -50,34 +55,51 @@ export const Workspace: React.FC = () => {
 
   const { lockToken } = useLockGuard(doc_id || null);
 
+  const fetchDoc = async () => {
+    try {
+      const res = await apiClient.get(`/documents/${doc_id}`);
+      const doc = res.data.data;
+      setDocMetadata(doc.doc_id, doc.doc_type_id, doc.doc_type_name, doc.status);
+      setContent(doc.content || '');
+      
+      if (doc.ai_polished_content) {
+        setPolishedResult(doc.ai_polished_content, doc.draft_suggestion);
+      }
+
+      if (doc.status !== 'DRAFTING') {
+        setReadOnly(true, 'IMMUTABLE');
+      }
+    } catch (err) {
+      message.error('加载公文失败');
+      navigate('/dashboard');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!doc_id) return;
-
-    const fetchDoc = async () => {
-      try {
-        const res = await apiClient.get(`/documents/${doc_id}`);
-        const doc = res.data.data;
-        setDocMetadata(doc.doc_id, doc.doc_type_id, doc.doc_type_name, doc.status);
-        setContent(doc.content || '');
-        
-        if (doc.ai_polished_content) {
-          setPolishedResult(doc.ai_polished_content, doc.draft_suggestion);
-        }
-
-        if (doc.status !== 'DRAFTING') {
-          setReadOnly(true, 'IMMUTABLE');
-        }
-      } catch (err) {
-        message.error('加载公文失败');
-        navigate('/dashboard');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchDoc();
     return () => resetEditor();
   }, [doc_id]);
+
+  // 监听异步任务完成 (Task 2 & 4)
+  useEffect(() => {
+    if (currentTaskId && taskResults[currentTaskId]) {
+      const result = taskResults[currentTaskId];
+      if (result.event === 'task.completed' || result.task_status === 'COMPLETED') {
+        fetchDoc().then(() => {
+          message.success('AI 润色已就绪');
+          setBusy(false);
+          setCurrentTaskId(null);
+        });
+      } else if (result.event === 'task.failed' || result.task_status === 'FAILED') {
+        message.error('AI 润色失败: ' + (result.error_message || '未知错误'));
+        setBusy(false);
+        setCurrentTaskId(null);
+      }
+    }
+  }, [currentTaskId, taskResults]);
 
   useEffect(() => {
     if (!doc_id || isReadOnly || isBusy) return;
@@ -108,13 +130,16 @@ export const Workspace: React.FC = () => {
       const snapRes = await apiClient.get('/kb/snapshot-version');
       const snapshotVersion = snapRes.data.data.snapshot_version;
 
-      await apiClient.post('/tasks/polish', {
+      const res = await apiClient.post('/tasks/polish', {
         doc_id,
         context_kb_ids,
         context_snapshot_version: snapshotVersion,
         exemplar_id: exemplarId
       });
       
+      const taskId = res.data.data.task_id;
+      addTask(taskId);
+      setCurrentTaskId(taskId);
       message.info('AI 润色任务已派发，请稍候...');
     } catch (e) {
       setBusy(false);

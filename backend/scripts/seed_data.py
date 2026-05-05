@@ -1,4 +1,10 @@
 from sqlalchemy.orm import Session
+import sys
+import os
+
+# 确保 app 模块可被导入
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from app.core.database import SyncSessionLocal
 from app.models.user import SystemUser, Department
 from app.models.document import Document, DocumentType

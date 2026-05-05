@@ -17,6 +17,19 @@ class LockService:
         if doc.status != "DRAFTING":
             raise BusinessException(409, "公文已流转，不可编辑", "READONLY_IMMUTABLE")
         
+        # 幂等性支持 (§一.11)：检查是否已由当前用户持锁
+        from app.core.locks import redis_client
+        existing_val = await redis_client.get(f"lock:{doc_id}")
+        if existing_val:
+            import json
+            data = json.loads(existing_val)
+            if data.get("user_id") == user_id:
+                # 已持锁，续期并返回旧 token
+                await redis_client.expire(f"lock:{doc_id}", 180)
+                return data.get("token")
+            else:
+                raise BusinessException(423, "公文正在被他人编辑，当前只读", "READONLY_CONFLICT")
+
         token = str(uuid.uuid4())
         success = await acquire_redis_lock(doc_id, user_id, username, token, ttl=180)
         if not success:
@@ -40,7 +53,9 @@ class LockService:
                 doc.content = content
                 await db.commit()
                 
-        await release_redis_lock(doc_id, user_id, token)
+        success = await release_redis_lock(doc_id, user_id, token)
+        if not success:
+            raise BusinessException(403, "无权释放他人持有的编辑锁")
 
     @staticmethod
     async def force_release(db: AsyncSession, doc_id: str, admin_id: int):

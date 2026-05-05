@@ -78,7 +78,7 @@ async def refresh_token(request: Request, response: Response, db: AsyncSession =
     return {"code": 200, "message": "success", "data": {"access_token": access_token}}
 
 @router.post("/logout")
-async def logout(current_user: SystemUser = Depends(get_current_user), response: Response, db: AsyncSession = Depends(get_db)):
+async def logout(response: Response, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     # 清除会话记录（契约 §1）
     await AuthService.clear_user_sessions(db, current_user.user_id)
     await db.commit()

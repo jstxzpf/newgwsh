@@ -25,27 +25,27 @@ export function useLockGuard(docId: string | null) {
       lockTokenRef.current = null;
     }
   };
-const acquireLock = async () => {
-  if (!docId) return;
-  try {
-    // 1. 获取动态配置 (§五.5)
-    const configRes = await apiClient.get('/locks/config');
-    const { lock_ttl_seconds, heartbeat_interval_seconds } = configRes.data.data;
 
-    // 2. 申请锁
-    const res = await apiClient.post('/locks/acquire', { doc_id: docId });
-    lockTokenRef.current = res.data.data.lock_token;
+  const acquireLock = async () => {
+    if (!docId) return;
+    try {
+      // 1. 获取动态配置 (§五.5)
+      const configRes = await apiClient.get('/locks/config');
+      const { lock_ttl_seconds, heartbeat_interval_seconds } = configRes.data.data;
 
-    setReadOnly(false);
-    setLockTTL(lock_ttl_seconds);
+      // 2. 申请锁
+      const res = await apiClient.post('/locks/acquire', { doc_id: docId });
+      lockTokenRef.current = res.data.data.lock_token;
 
-    // 3. 启动 Web Worker
-    workerRef.current?.postMessage({ 
-      type: 'START', 
-      interval: heartbeat_interval_seconds * 1000 
-    });
-  } catch (err: any) {
-...
+      setReadOnly(false);
+      setLockTTL(lock_ttl_seconds);
+
+      // 3. 启动 Web Worker
+      workerRef.current?.postMessage({ 
+        type: 'START', 
+        interval: heartbeat_interval_seconds * 1000 
+      });
+    } catch (err: any) {
       // 刚性控制 (§七.2)：锁获取失败 409/423 触发只读
       if (err.response?.status === 409 || err.response?.status === 423) {
         setReadOnly(true, 'CONFLICT');

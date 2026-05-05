@@ -91,7 +91,7 @@ export const Documents: React.FC = () => {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (date: string) => new Date(data).toLocaleString(),
+      render: (date: string) => new Date(date).toLocaleString(),
     },
     {
       title: '操作',

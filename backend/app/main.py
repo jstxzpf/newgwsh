@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from app.core.exceptions import BusinessException, business_exception_handler, validation_exception_handler
-from app.api.v1 import auth, locks, documents, sse, tasks, kb_admin, approval, chat, notifications, sys
+from app.api.v1 import auth, locks, documents, sse, tasks, kb_admin, approval, chat, notifications, sys, audit, exemplars
 
 app = FastAPI(title="泰兴调查队公文处理系统 V3.0")
 
@@ -18,6 +18,8 @@ app.include_router(approval.router, prefix="/api/v1/approval", tags=["审批签�
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["智能问答"])
 app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["消息通知"])
 app.include_router(sys.router, prefix="/api/v1/sys", tags=["系统中枢"])
+app.include_router(audit.router, prefix="/api/v1/audit", tags=["安全审计"])
+app.include_router(exemplars.router, prefix="/api/v1/exemplars", tags=["参考范文"])
 
 @app.get("/health")
 async def health_check():

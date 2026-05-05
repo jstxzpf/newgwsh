@@ -1,8 +1,9 @@
 version: '3.8'
 
 services:
+  # 1. 开发数据库：PostgreSQL 16 + pgvector
   db:
-    image: pgvector/pgvector:pg15
+    image: pgvector/pgvector:pg16
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -10,19 +11,21 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - pg_dev_data:/var/lib/postgresql/data
     networks:
       - backend_net
 
+  # 2. 开发缓存与锁控：Redis 7.2
   redis:
-    image: redis:5.0-alpine
+    image: redis:7.2-alpine
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - redis_dev_data:/data
     networks:
       - backend_net
 
+  # 3. 开发 API 引擎 (FastAPI)
   api:
     build:
       context: ./backend
@@ -32,7 +35,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
-      - ./app/prompts:/app/app/prompts
+      - ./backend/app/prompts:/app/app/prompts
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -41,6 +44,8 @@ services:
       - POSTGRES_PORT=5432
       - REDIS_URL=redis://redis:6379/0
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - SIP_SECRET_KEY=TX_NBS_DEV_SECRET
+      - SECRET_KEY=TX_NBS_DEV_JWT_SECRET_999
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -50,6 +55,48 @@ services:
       - frontend_net
       - backend_net
 
+  # 4. 异步任务 Worker (POLISH / FORMAT / PARSE)
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.tasks.worker worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend:/app
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=newgwsh_db
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - SIP_SECRET_KEY=TX_NBS_DEV_SECRET
+      - SECRET_KEY=TX_NBS_DEV_JWT_SECRET_999
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - db
+      - redis
+    networks:
+      - backend_net
+
+  # 5. 前端开发容器 (React/Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      # 防止 node_modules 被宿主机覆盖
+      - /app/node_modules
+    depends_on:
+      - api
+    networks:
+      - frontend_net
+
 networks:
   frontend_net:
     driver: bridge
@@ -57,6 +104,6 @@ networks:
     driver: bridge
 
 volumes:
-  pg_data:
-  redis_data:
+  pg_dev_data:
+  redis_dev_data:
   archive_root:

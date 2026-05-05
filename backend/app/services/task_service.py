@@ -3,7 +3,7 @@ from sqlalchemy import select
 from app.models.system import AsyncTask
 from app.models.document import Document
 from app.core.exceptions import BusinessException
-from app.tasks.worker import process_polish_task
+from app.tasks.worker import process_polish_task, process_format_task, process_parse_task
 import uuid
 
 class TaskService:
@@ -37,3 +37,37 @@ class TaskService:
         # 派发 Celery
         process_polish_task.delay(task_id, doc_id)
         return task_id
+
+    @staticmethod
+    async def trigger_format_task(db: AsyncSession, doc_id: str, creator_id: int) -> str:
+        # 铁律 (§4)：状态校验
+        doc_result = await db.execute(select(Document).where(Document.doc_id == doc_id))
+        doc = doc_result.scalars().first()
+        if not doc or doc.status not in ["DRAFTING", "APPROVED"]:
+            raise BusinessException(400, "仅允许对起草中或已通过的公文触发排版")
+
+        task_id = str(uuid.uuid4())
+        new_task = AsyncTask(
+            task_id=task_id, task_type="FORMAT", doc_id=doc_id, creator_id=creator_id,
+            input_params={"doc_id": doc_id}
+        )
+        db.add(new_task)
+        process_format_task.delay(doc_id, task_id)
+        return task_id
+
+    @staticmethod
+    async def retry_failed_task(db: AsyncSession, task_id: str):
+        result = await db.execute(select(AsyncTask).where(AsyncTask.task_id == task_id))
+        task = result.scalars().first()
+        if not task or task.task_status != "FAILED" or task.retry_count >= 3:
+            raise BusinessException(400, "该任务不可重试")
+        
+        task.task_status = "QUEUED"
+        task.retry_count += 1
+        
+        if task.task_type == "POLISH":
+            process_polish_task.delay(task.task_id, task.doc_id)
+        elif task.task_type == "FORMAT":
+            process_format_task.delay(task.doc_id, task.task_id)
+        elif task.task_type == "PARSE":
+            process_parse_task.delay(task.kb_id, task.task_id)

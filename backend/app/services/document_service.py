@@ -58,12 +58,13 @@ class DocumentService:
         
         # 逻辑：变更状态并释放锁
         doc.status = DocumentStatus.SUBMITTED
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         
         log = DocumentApprovalLog(
             doc_id=doc.doc_id,
             submitter_id=user_id,
             decision_status="SUBMITTED",
-            submitted_at=datetime.now(timezone.utc)
+            submitted_at=now
         )
         db.add(log)
         
@@ -73,7 +74,8 @@ class DocumentService:
             operator_id=user_id
         )
         db.add(audit)
-        # 注意：锁释放由调用方在 commit 后执行或通过 API 逻辑保证
+        await db.flush()
+        return log.log_id
 
     @staticmethod
     async def revise_document(db: AsyncSession, doc: Document, user_id: int, username: str) -> dict:
@@ -131,7 +133,7 @@ class DocumentService:
 
     @staticmethod
     async def process_approval(db: AsyncSession, doc: Document, action: str, reviewer_id: int, comments: str | None):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         
         if action == "APPROVE":
             doc.status = DocumentStatus.APPROVED

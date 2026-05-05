@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, BigInt, Index, func
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, Index, func, BIGINT, text
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
@@ -11,7 +11,7 @@ class KnowledgePhysicalFile(Base):
     file_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     content_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     file_path: Mapped[str] = mapped_column(String(512), nullable=False)
-    file_size: Mapped[int | None] = mapped_column(BigInt, nullable=True)
+    file_size: Mapped[int | None] = mapped_column(BIGINT, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     # Relationships
@@ -81,7 +81,7 @@ class KnowledgeChunk(Base):
         ),
         Index(
             "idx_chunk_content_gin",
-            func.to_tsvector('zh', content),
+            text("to_tsvector('simple', content)"),
             postgresql_using="gin",
             postgresql_where=(is_deleted == False),
         ),
