@@ -9,7 +9,7 @@ from app.core.config import settings
 OLLAMA_GENERATE = f"{settings.OLLAMA_BASE_URL}/api/generate"
 
 
-def generate_sync(prompt: str, model: str = "qwen2.5:7b", timeout: int = 180) -> str:
+def generate_sync(prompt: str, model: str = "qwen3.5:9b", timeout: int = 180) -> str:
     """Synchronous generate — used by Celery worker."""
     with httpx.Client(timeout=timeout) as client:
         resp = client.post(OLLAMA_GENERATE, json={

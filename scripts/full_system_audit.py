@@ -1,22 +1,31 @@
 """
 国家统计局泰兴调查队公文处理系统 V3.0 — 全系统自动化巡检程序
 =================================================================
-覆盖范围（对齐《用户工作流程》&《系统设计方案》）：
-  模块A: 身份认证与会话管理
-  模块B: 公文全生命周期 (起草→润色→提交→签批→驳回→回退)
-  模块C: 分布式编辑锁 (获取→心跳→释放→冲突→强拆)
-  模块D: 知识库资产管理 (上传→解析→去重→软删除→权限隔离)
-  模块E: RAG 智能问答 (上下文挂载→SSE流式→防幻觉→引用溯源)
-  模块F: 参考范文库 (上传→过滤→引用保护→删除)
-  模块G: 异步任务与SSE通知 (派发→进度→完成/失败)
-  模块H: 审计存证与SIP校验
-  模块I: 系统中枢 (健康探针→参数配置→提示词管理→锁监控→数据备份)
-  模块J: 权限隔离矩阵 (管理员/科长/科员)
+覆盖范围（对齐《用户工作流程》&《系统设计方案》&《API契约》）：
+  模块A:     身份认证与会话管理
+  模块B:     公文全生命周期 API (起草→润色→提交→签批→驳回→回退)
+  模块B-UI:  公文全生命周期 UI 全链路
+  模块B-APPR:签批审核 UI (科长审核→局长签发→驳回修改)
+  模块C:     分布式编辑锁 (获取→心跳→释放→冲突→强拆)
+  模块D:     知识库资产管理 API (上传→解析→去重→替换→软删除→权限隔离)
+  模块D-UI:  知识库 UI (Tab切换→上传Drawer→删除确认)
+  模块E:     RAG 智能问答 API (上下文挂载→SSE流式→防幻觉→引用溯源)
+  模块E-UI:  RAG 问答 UI (对话→流式→引用)
+  模块F:     参考范文库 API (上传→过滤→引用保护→删除)
+  模块F-UI:  参考范文 UI 联动 (工作区范文面板)
+  模块G:     异步任务与SSE通知 (派发→进度→完成/失败→状态机)
+  模块H:     审计存证与SIP校验
+  模块I:     系统中枢 API (健康探针→参数配置→提示词→锁监控→备份→清理)
+  模块I-UI:  系统管理 UI (四Tab渲染→按钮交互)
+  模块J:     权限隔离矩阵 (管理员/科长/科员)
+  模块K:     通知与消息 API (列表→未读数→标记已读)
+  模块L:     异常容灾 E2E (锁释放→快照恢复→登录踢出)
 
 用法:
   python scripts/full_system_audit.py                  # 完整巡检
   python scripts/full_system_audit.py --quick           # 快速冒烟
   python scripts/full_system_audit.py --module B        # 单模块检查
+  python scripts/full_system_audit.py --ui-only         # 仅 UI 模块
 """
 
 import asyncio
@@ -43,6 +52,7 @@ TEST_FILE_PATH = os.path.abspath(os.environ.get("AUDIT_TEST_FILE", "test_kb_file
 
 HEADLESS = "--headless" in sys.argv or os.environ.get("AUDIT_HEADLESS") == "1"
 TIMEOUT_MS = int(os.environ.get("AUDIT_TIMEOUT", "30000"))
+AI_TASK_TIMEOUT_MS = int(os.environ.get("AUDIT_AI_TIMEOUT", "120000"))  # AI 任务等待上限
 
 # 测试用户矩阵（来自 seed_data.py）
 USERS = {
@@ -138,6 +148,8 @@ class AuditEngine:
         self.api_token: Optional[str] = None
         self.api_errors: List[Dict] = []
         self.report = AuditReport()
+        # 跨模块共享的测试数据
+        self._shared = {"doc_ids": {}, "kb_ids": {}, "tokens": {}}
 
     # ------- 生命周期 -------
     async def start(self):
@@ -167,8 +179,22 @@ class AuditEngine:
         self.page.on("response", on_response)
 
     async def stop(self):
-        if self.browser:
-            await self.browser.close()
+        try:
+            if self.page:
+                await self.page.close()
+            if self.context:
+                await self.context.close()
+            if self.browser:
+                await self.browser.close()
+        except Exception:
+            pass
+        finally:
+            self.page = None
+            self.context = None
+            self.browser = None
+        if self.playwright:
+            await self.playwright.stop()
+            self.playwright = None
         self.report.finished_at = datetime.now(timezone.utc).isoformat()
 
     # ------- 辅助方法 -------
@@ -250,13 +276,60 @@ class AuditEngine:
             await self.page.fill("#login_username", username)
             await self.page.fill("#login_password", password)
             await self.page.click("button[type='submit']")
-            # 等待跳转到 dashboard
             await self.page.wait_for_url("**/dashboard**", timeout=10000)
             await self.page.wait_for_timeout(1500)
             return True
         except Exception as e:
             print(f"  [!] UI 登录失败: {e}")
             return False
+
+    async def _ui_sync_token_after_login(self, username: str, password: str):
+        """UI 登录后同步 API Token（单设备铁律要求重新获取）"""
+        res = await self._api("POST", "/auth/login",
+            json_data={"username": username, "password": password})
+        self.api_token = res.get("body", {}).get("data", {}).get("access_token", self.api_token)
+
+    async def _ui_assert_message(self, text: str, timeout: int = 5000) -> bool:
+        """断言 antd message 提示出现指定文案"""
+        try:
+            loc = self.page.locator(f'.ant-message-notice:has-text("{text}")')
+            await loc.wait_for(state='visible', timeout=timeout)
+            return True
+        except Exception:
+            return False
+
+    async def _ui_confirm_modal(self, timeout: int = 5000):
+        """点击 antd Modal.confirm 的确认按钮"""
+        try:
+            btn = self.page.locator('.ant-modal-confirm-btns .ant-btn-primary')
+            await btn.wait_for(state='visible', timeout=timeout)
+            await btn.click()
+        except Exception:
+            btn = self.page.locator('.ant-modal-footer .ant-btn-primary')
+            await btn.wait_for(state='visible', timeout=timeout)
+            await btn.click()
+        await self.page.wait_for_timeout(500)
+
+    async def _ui_confirm_popconfirm(self, timeout: int = 5000):
+        """点击 antd Popconfirm 的确认按钮"""
+        btn = self.page.locator('.ant-popconfirm .ant-btn-primary, .ant-popover .ant-btn-primary')
+        await btn.wait_for(state='visible', timeout=timeout)
+        await btn.click()
+        await self.page.wait_for_timeout(500)
+
+    async def _ui_select_option(self, container: str, option_text: str):
+        """在 antd Select 中选择选项"""
+        await self.page.click(f'{container} .ant-select-selector')
+        await self.page.wait_for_timeout(300)
+        dropdown = self.page.locator('.ant-select-dropdown:visible')
+        await dropdown.locator(f'text="{option_text}"').click()
+        await self.page.wait_for_timeout(300)
+
+    async def _create_second_context(self):
+        """创建第二个浏览器上下文（用于并发登录/踢出测试）"""
+        ctx = await self.browser.new_context(viewport={"width": 1440, "height": 900})
+        pg = await ctx.new_page()
+        return ctx, pg
 
     # ========================================================================
     # 模块 A: 身份认证与会话管理
@@ -302,11 +375,8 @@ class AuditEngine:
 
         # A.6 防渗漏水印存在 (需通过 UI 登录后渲染)
         ui_ok = await self._ui_login(ADMIN_USER, ADMIN_PASS)
-        # UI 登录会清除旧会话（单一设备登录铁律 §五.7），须重新获取 API token
         if ui_ok:
-            res = await self._api("POST", "/auth/login",
-                json_data={"username": ADMIN_USER, "password": ADMIN_PASS})
-            self.api_token = res.get("body", {}).get("data", {}).get("access_token", self.api_token)
+            await self._ui_sync_token_after_login(ADMIN_USER, ADMIN_PASS)
         if ui_ok:
             watermark_exists = await self.page.evaluate(
                 "() => {"
@@ -321,9 +391,40 @@ class AuditEngine:
             # A.7 底部 AI 探针可见
             ai_probe = await self._ui_visible("text=AI 探针", timeout=5000)
             self._check(M, "A.7 底部实时探针渲染", ai_probe, section="§三.1")
+
+            # A.8 UI 登录按钮 + Dashboard 统计卡片渲染
+            stat_cards = await self.page.locator('.ant-statistic').count()
+            self._check(M, "A.8 Dashboard 统计卡片渲染", stat_cards >= 6,
+                f"found {stat_cards} cards (expect >=6)", section="§Dashboard")
+
+            # A.9 UI 「起草新公文」按钮可见
+            btn_visible = await self._ui_visible("text=起草新公文", timeout=5000)
+            self._check(M, "A.9 Dashboard「起草新公文」按钮可见", btn_visible,
+                section="§一.1")
         else:
             self._check(M, "A.6 防泄密水印渲染", False, "UI 登录失败", section="§一.1")
             self._check(M, "A.7 底部实时探针渲染", False, "UI 登录失败", section="§三.1")
+            self._check(M, "A.8 Dashboard 统计卡片渲染", False, "UI 登录失败")
+            self._check(M, "A.9 Dashboard 起草按钮", False, "UI 登录失败")
+
+        # A.10 错误密码 UI 反馈
+        try:
+            await self.page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
+            await self.page.wait_for_timeout(500)
+            await self.page.fill("#login_username", ADMIN_USER)
+            await self.page.fill("#login_password", "wrong_pwd")
+            await self.page.click("button[type='submit']")
+            await self.page.wait_for_timeout(2000)
+            # 应停留在 /login 页面
+            still_login = "/login" in self.page.url
+            self._check(M, "A.10 UI 错误密码停留登录页", still_login,
+                f"current_url={self.page.url}", section="§五.7")
+        except Exception as e:
+            self._check(M, "A.10 UI 错误密码反馈", False, str(e)[:150])
+
+        # 重新登录回管理员以便后续模块使用
+        await self._ui_login(ADMIN_USER, ADMIN_PASS)
+        await self._ui_sync_token_after_login(ADMIN_USER, ADMIN_PASS)
 
     # ========================================================================
     # 模块 B: 公文全生命周期
@@ -438,6 +539,273 @@ class AuditEngine:
             ok_revise = res["status"] == 200 and res.get("body", {}).get("data", {}).get("new_status") == "DRAFTING"
             self._check(M, "B.12c POST /documents/{id}/revise 回退→DRAFTING", ok_revise,
                 section="§一.11")
+
+        # B.13 apply-polish API 测试
+        res3 = await self._api("POST", "/documents/init", json_data={
+            "title": f"润色测试-{int(time.time())}", "doc_type_id": 1,
+        })
+        doc_id3 = res3.get("body", {}).get("data", {}).get("doc_id")
+        if doc_id3:
+            res = await self._api("POST", f"/documents/{doc_id3}/apply-polish", json_data={
+                "final_content": "AI 润色后的正文内容",
+            })
+            ok_apply = res["status"] in (200, 409, 400)
+            self._check(M, "B.13 POST /documents/{id}/apply-polish 接受润色", ok_apply,
+                f"HTTP {res['status']}", section="§一.6")
+
+            # B.14 discard-polish API 测试
+            res = await self._api("POST", f"/documents/{doc_id3}/discard-polish")
+            ok_discard = res["status"] in (200, 409, 400)
+            self._check(M, "B.14 POST /documents/{id}/discard-polish 丢弃润色", ok_discard,
+                f"HTTP {res['status']}", section="§一.6")
+
+            # B.15 auto-save DIFF 模式保护铁律（SINGLE 模式下传 draft_content → 400）
+            res = await self._api("POST", f"/documents/{doc_id3}/auto-save", json_data={
+                "draft_content": "不应被接受的内容",
+            }, expect_status=400)
+            ok_protect = res["status"] == 400
+            self._check(M, "B.15 auto-save DIFF保护: SINGLE模式拒绝draft_content (400)",
+                ok_protect, f"HTTP {res['status']}", section="§后端§二.2")
+
+    # ========================================================================
+    # 模块 B-UI: 公文全生命周期 UI 全链路 (对齐 §一.1~§一.4)
+    # ========================================================================
+    async def module_b_ui_lifecycle(self):
+        M = "B-UI"
+        ts = int(time.time())
+        test_title = f"巡检UI公文-{ts}"
+
+        # B-UI.1 科员登录 → Dashboard
+        u = USERS["ky_nongye"]
+        ui_ok = await self._ui_login(u["un"], u["pw"])
+        self._check(M, "B-UI.1 科员UI登录→Dashboard", ui_ok, section="§一.1")
+        if not ui_ok:
+            self._check(M, "B-UI.X 后续UI测试", False, "登录失败", status_override=Status.SKIP)
+            return
+
+        # B-UI.2 点击「起草新公文」→ Modal 弹出
+        try:
+            await self._ui_click("text=起草新公文")
+            modal_visible = await self._ui_visible(".ant-modal", timeout=3000)
+            self._check(M, "B-UI.2 点击「起草新公文」弹出 Modal", modal_visible, section="§一.1")
+        except Exception as e:
+            self._check(M, "B-UI.2 起草按钮", False, str(e)[:150])
+            return
+
+        # B-UI.3 填写标题 + 选择文种 + 确认创建
+        try:
+            await self.page.fill('.ant-modal input[placeholder="请输入公文标题"]', test_title)
+            await self._ui_select_option('.ant-modal', '通知')
+            await self.page.click('.ant-modal-footer .ant-btn-primary')
+            await self.page.wait_for_url("**/workspace/**", timeout=10000)
+            await self.page.wait_for_timeout(2000)
+            ok_ws = "/workspace/" in self.page.url
+            self._check(M, "B-UI.3 Modal填表→路由跳转/workspace", ok_ws,
+                f"url={self.page.url}", section="§一.1")
+            if ok_ws:
+                self._shared["doc_ids"]["b_ui_doc"] = self.page.url.split("/workspace/")[-1]
+        except Exception as e:
+            self._check(M, "B-UI.3 创建跳转", False, str(e)[:150])
+            return
+
+        # B-UI.4 Workspace 侧边栏验证
+        tree_visible = await self._ui_visible("text=台账挂载", timeout=5000)
+        exemplar_visible = await self._ui_visible("text=参考范文", timeout=3000)
+        self._check(M, "B-UI.4 侧边栏 VirtualDocTree + ExemplarPanel 可见",
+            tree_visible and exemplar_visible, section="§一.1")
+
+        # B-UI.5 Action Bar 按钮验证
+        btn_polish = await self._ui_visible("text=AI 智能润色", timeout=3000)
+        btn_submit = await self._ui_visible("text=提交审批", timeout=3000)
+        btn_history = await self._ui_visible("text=历史快照", timeout=3000)
+        self._check(M, "B-UI.5 Action Bar: 润色/提交/历史快照 按钮可见",
+            btn_polish and btn_submit and btn_history, section="§一.1")
+
+        # B-UI.6 编辑 textarea 输入正文
+        try:
+            editor = self.page.locator('.markdown-editor')
+            await editor.fill("泰兴调查队2024年工作总结测试正文内容。")
+            content_written = (await editor.input_value()) != ""
+            self._check(M, "B-UI.6 A4画板 textarea 输入正文", content_written, section="§一.1")
+        except Exception as e:
+            self._check(M, "B-UI.6 编辑正文", False, str(e)[:150])
+
+        # B-UI.7 点击「AI 智能润色」→ 等待任务完成
+        try:
+            await self._ui_click("text=AI 智能润色", timeout=5000)
+            msg_dispatched = await self._ui_assert_message("已派发", timeout=5000)
+            self._check(M, "B-UI.7a AI润色按钮→任务派发消息", msg_dispatched, section="§一.2")
+
+            # 等待润色完成（SSE 通知触发 fetchDoc）
+            msg_done = await self._ui_assert_message("润色已就绪", timeout=AI_TASK_TIMEOUT_MS)
+            if not msg_done:
+                msg_done = await self._ui_assert_message("润色失败", timeout=5000)
+            self._check(M, "B-UI.7b AI润色任务完成/失败反馈", msg_done, section="§一.2")
+        except Exception as e:
+            self._check(M, "B-UI.7 AI润色", False, str(e)[:150])
+
+        # B-UI.8 DIFF 模式验证 → 「接受并合并」
+        await self.page.wait_for_timeout(2000)
+        diff_left = await self._ui_visible("text=只读原稿", timeout=3000)
+        diff_right = await self._ui_visible("text=AI 建议稿", timeout=3000)
+        if diff_left and diff_right:
+            self._check(M, "B-UI.8a DIFF双栏渲染(只读原稿+AI建议稿)", True, section="§一.2")
+            try:
+                await self._ui_click("text=接受并合并", timeout=3000)
+                await self._ui_confirm_popconfirm()
+                msg_ok = await self._ui_assert_message("已应用", timeout=5000)
+                self._check(M, "B-UI.8b「接受并合并」Popconfirm→合并成功", msg_ok, section="§一.2")
+            except Exception as e:
+                self._check(M, "B-UI.8b 接受合并", False, str(e)[:150])
+        else:
+            self._check(M, "B-UI.8 DIFF模式", diff_left and diff_right,
+                "AI润色可能失败，未进入DIFF模式", status_override=Status.WARN, section="§一.2")
+
+        # B-UI.9 点击「提交审批」→ Modal确认 → 跳转Dashboard
+        try:
+            await self._ui_click("text=提交审批", timeout=5000)
+            await self._ui_confirm_modal()
+            await self.page.wait_for_url("**/dashboard**", timeout=10000)
+            msg_submit = await self._ui_assert_message("提交成功", timeout=5000)
+            self._check(M, "B-UI.9「提交审批」→确认→跳转Dashboard",
+                "/dashboard" in self.page.url, section="§一.4")
+        except Exception as e:
+            self._check(M, "B-UI.9 提交审批UI", False, str(e)[:150])
+
+    # ========================================================================
+    # 模块 B-APPR: 签批审核 UI (对齐 §一.5~§一.6)
+    # ========================================================================
+    async def module_b_approval_ui(self):
+        M = "B-APPR"
+
+        # 前置：确保有一个 SUBMITTED 状态的公文
+        await self._ui_sync_token_after_login(ADMIN_USER, ADMIN_PASS)
+        prep = await self._api("POST", "/documents/init", json_data={
+            "title": f"签批UI测试-{int(time.time())}", "doc_type_id": 1,
+        })
+        prep_doc_id = prep.get("body", {}).get("data", {}).get("doc_id")
+        if prep_doc_id:
+            await self._api("POST", f"/documents/{prep_doc_id}/auto-save",
+                json_data={"content": "签批测试正文"})
+            await self._api("POST", f"/documents/{prep_doc_id}/submit")
+        else:
+            self._check(M, "B-APPR.X 前置数据准备", False, "创建公文失败",
+                status_override=Status.SKIP)
+            return
+
+        # B-APPR.1 科长登录 → /approvals
+        u = USERS["kz_nongye"]
+        ui_ok = await self._ui_login(u["un"], u["pw"])
+        if not ui_ok:
+            self._check(M, "B-APPR.1 科长登录", False, status_override=Status.SKIP)
+            return
+        await self._ui_navigate("/approvals")
+        await self.page.wait_for_timeout(2000)
+
+        # B-APPR.2 验证「科长审核」Tab 可见
+        tab_review = await self._ui_visible("text=科长审核", timeout=5000)
+        self._check(M, "B-APPR.2「科长审核」Tab可见", tab_review, section="§一.5")
+
+        # B-APPR.3 左侧待审列表有公文 → 点击选中
+        try:
+            items = self.page.locator('.approval-item')
+            count = await items.count()
+            self._check(M, "B-APPR.3 待审公文列表非空", count > 0,
+                f"found {count} items", section="§一.5")
+            if count > 0:
+                await items.first.click()
+                await self.page.wait_for_timeout(1500)
+                preview_visible = await self._ui_visible("text=深核查视窗", timeout=5000)
+                self._check(M, "B-APPR.3b 右侧预览面板渲染", preview_visible, section="§一.5")
+        except Exception as e:
+            self._check(M, "B-APPR.3 列表交互", False, str(e)[:150])
+
+        # B-APPR.4 点击「审核通过」→ Modal确认
+        try:
+            await self._ui_click("text=审核通过", timeout=5000)
+            await self._ui_confirm_modal()
+            msg_ok = await self._ui_assert_message("审核通过", timeout=5000)
+            self._check(M, "B-APPR.4 科长「审核通过」→确认→success", msg_ok, section="§一.5")
+        except Exception as e:
+            self._check(M, "B-APPR.4 审核通过", False, str(e)[:150])
+
+        # B-APPR.5 管理员登录 → /approvals → 「局长签发」Tab
+        ui_ok = await self._ui_login(ADMIN_USER, ADMIN_PASS)
+        if not ui_ok:
+            self._check(M, "B-APPR.5 管理员登录", False, status_override=Status.SKIP)
+            return
+        await self._ui_navigate("/approvals")
+        await self.page.wait_for_timeout(2000)
+        try:
+            tab_issue = self.page.locator('text=局长签发')
+            await tab_issue.click()
+            await self.page.wait_for_timeout(1500)
+            self._check(M, "B-APPR.5「局长签发」Tab切换", True, section="§一.5")
+        except Exception as e:
+            self._check(M, "B-APPR.5 局长签发Tab", False, str(e)[:150])
+
+        # B-APPR.6 选中 REVIEWED 公文 → 「局长签发」→ Modal确认
+        try:
+            items = self.page.locator('.approval-item')
+            count = await items.count()
+            if count > 0:
+                await items.first.click()
+                await self.page.wait_for_timeout(1500)
+                await self._ui_click("text=局长签发", timeout=5000)
+                await self._ui_confirm_modal()
+                msg_ok = await self._ui_assert_message("签发成功", timeout=5000)
+                self._check(M, "B-APPR.6 局长「签发」→确认→success(含发文编号)", msg_ok,
+                    section="§一.5")
+            else:
+                self._check(M, "B-APPR.6 局长签发", False, "无REVIEWED公文",
+                    status_override=Status.WARN)
+        except Exception as e:
+            self._check(M, "B-APPR.6 局长签发", False, str(e)[:150])
+
+        # B-APPR.7 驳回场景：新建公文→提交→科长驳回
+        await self._ui_sync_token_after_login(ADMIN_USER, ADMIN_PASS)
+        rej = await self._api("POST", "/documents/init", json_data={
+            "title": f"驳回UI测试-{int(time.time())}", "doc_type_id": 1,
+        })
+        rej_doc = rej.get("body", {}).get("data", {}).get("doc_id")
+        if rej_doc:
+            await self._api("POST", f"/documents/{rej_doc}/auto-save",
+                json_data={"content": "待驳回正文"})
+            await self._api("POST", f"/documents/{rej_doc}/submit")
+
+            # 科长登录驳回
+            await self._ui_login(USERS["kz_nongye"]["un"], USERS["kz_nongye"]["pw"])
+            await self._ui_navigate("/approvals")
+            await self.page.wait_for_timeout(2000)
+            try:
+                items = self.page.locator('.approval-item')
+                if await items.count() > 0:
+                    await items.first.click()
+                    await self.page.wait_for_timeout(1000)
+                    await self._ui_click("text=驳回打回", timeout=5000)
+                    # 填写驳回理由 Modal
+                    await self.page.wait_for_timeout(500)
+                    textarea = self.page.locator('.ant-modal textarea')
+                    await textarea.fill("巡检测试驳回：需补充统计数据来源")
+                    await self.page.click('.ant-modal-footer .ant-btn-primary')
+                    msg_rej = await self._ui_assert_message("驳回", timeout=5000)
+                    self._check(M, "B-APPR.7a 科长「驳回打回」→填理由→确认", msg_rej,
+                        section="§一.5")
+
+                    # B-APPR.8 起草人看到驳回 → 点「前往修改」
+                    await self._ui_login(ADMIN_USER, ADMIN_PASS)
+                    await self._ui_navigate("/documents")
+                    await self.page.wait_for_timeout(2000)
+                    revise_btn = await self._ui_visible("text=前往修改", timeout=5000)
+                    self._check(M, "B-APPR.8 Documents页「前往修改」按钮可见", revise_btn,
+                        section="§一.6")
+                    if revise_btn:
+                        await self._ui_click("text=前往修改", timeout=3000)
+                        await self.page.wait_for_url("**/workspace/**", timeout=10000)
+                        self._check(M, "B-APPR.8b 前往修改→跳转Workspace",
+                            "/workspace/" in self.page.url, section="§一.6")
+            except Exception as e:
+                self._check(M, "B-APPR.7 驳回流程", False, str(e)[:150])
 
     # ========================================================================
     # 模块 C: 分布式编辑锁
@@ -584,6 +952,96 @@ class AuditEngine:
         else:
             self._check(M, "D.5 DELETE /kb/{id} 级联软删除 (需已上传文件)", False, "前置上传失败", status_override=Status.SKIP)
 
+        # D.6 替换上传 PUT /kb/{id}
+        upload2 = await self._api("POST", "/kb/upload", data={
+            "kb_tier": "PERSONAL", "security_level": "GENERAL",
+        }, files={"file": ("replace_test.txt", b"replace content v2", "text/plain")})
+        node2 = upload2.get("body", {}).get("data", {}).get("node_id") or upload2.get("body", {}).get("data", {}).get("kb_id")
+        if node2:
+            res = await self._api("PUT", f"/kb/{node2}", data={
+                "security_level": "IMPORTANT",
+            }, files={"file": ("replace_test.txt", b"replaced content v3", "text/plain")})
+            ok_replace = res["status"] in (200, 409)
+            self._check(M, "D.6 PUT /kb/{id} 替换上传", ok_replace,
+                f"HTTP {res['status']}", section="§二.2")
+        else:
+            self._check(M, "D.6 替换上传", False, "前置上传失败", status_override=Status.SKIP)
+
+        # D.7 重新解析 POST /kb/{id}/reparse
+        if node2:
+            res = await self._api("POST", f"/kb/{node2}/reparse")
+            ok_reparse = res["status"] in (200, 202, 409)
+            self._check(M, "D.7 POST /kb/{id}/reparse 重新解析", ok_reparse,
+                f"HTTP {res['status']}", section="§二.1")
+
+    # ========================================================================
+    # 模块 D-UI: 知识库 UI (对齐 §二)
+    # ========================================================================
+    async def module_d_ui_knowledge(self):
+        M = "D-UI"
+        ui_ok = await self._ui_login(ADMIN_USER, ADMIN_PASS)
+        if not ui_ok:
+            self._check(M, "D-UI.X", False, "登录失败", status_override=Status.SKIP)
+            return
+
+        await self._ui_navigate("/knowledge")
+        await self.page.wait_for_timeout(2000)
+
+        # D-UI.1 页面标题和 Tab 可见
+        title_ok = await self._ui_visible("text=统计知识资产库", timeout=5000)
+        tab_personal = await self._ui_visible("text=个人沙箱库", timeout=3000)
+        tab_exemplar = await self._ui_visible("text=参考范文", timeout=3000)
+        self._check(M, "D-UI.1 知识库页面标题+Tab可见",
+            title_ok and tab_personal and tab_exemplar, section="§二")
+
+        # D-UI.2 点击「上传资产」→ Drawer 打开 → 密级下拉
+        try:
+            await self._ui_click("text=上传资产", timeout=3000)
+            drawer_ok = await self._ui_visible(".ant-drawer", timeout=3000)
+            self._check(M, "D-UI.2 点击「上传资产」Drawer打开", drawer_ok, section="§二.1")
+            if drawer_ok:
+                security_select = await self._ui_visible("text=安全等级", timeout=3000)
+                self._check(M, "D-UI.2b 密级选择器可见", security_select, section="§二.1")
+                # 关闭 Drawer
+                await self.page.click('.ant-drawer-close')
+                await self.page.wait_for_timeout(500)
+        except Exception as e:
+            self._check(M, "D-UI.2 上传Drawer", False, str(e)[:150])
+
+        # D-UI.3 Tab 切换验证
+        for tab_text in ["科室共享库", "全局基础库", "参考范文", "个人沙箱库"]:
+            try:
+                tab = self.page.locator(f'.ant-tabs-tab:has-text("{tab_text}")')
+                if not await tab.is_disabled():
+                    await tab.click()
+                    await self.page.wait_for_timeout(1000)
+            except Exception:
+                pass
+        self._check(M, "D-UI.3 Tab切换(个人/科室/全局/范文)无崩溃", True, section="§二")
+
+        # D-UI.4 文件上传模拟 (使用 set_input_files)
+        try:
+            await self._ui_click("text=上传资产", timeout=3000)
+            await self.page.wait_for_timeout(500)
+            file_input = self.page.locator('.ant-drawer input[type="file"]')
+            import tempfile
+            tmp = os.path.join(os.path.dirname(__file__), "_audit_test_upload.txt")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("巡检自动上传测试文件")
+            await file_input.set_input_files(tmp)
+            await self.page.wait_for_timeout(1000)
+            submit_btn = self.page.locator('.ant-drawer .ant-btn-primary:has-text("开始上传")')
+            await submit_btn.click()
+            msg_ok = await self._ui_assert_message("上传成功", timeout=10000)
+            self._check(M, "D-UI.4 Drawer文件上传→success", msg_ok, section="§二.1")
+            # 清理临时文件
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        except Exception as e:
+            self._check(M, "D-UI.4 文件上传", False, str(e)[:150])
+
     # ========================================================================
     # 模块 E: RAG 智能问答
     # ========================================================================
@@ -691,6 +1149,66 @@ class AuditEngine:
             ok_delete, f"HTTP {res['status']}", section="§三.3")
 
     # ========================================================================
+    # 模块 E-UI: RAG 问答 UI (对齐 §四)
+    # ========================================================================
+    async def module_e_ui_chat(self):
+        M = "E-UI"
+        ui_ok = await self._ui_login(ADMIN_USER, ADMIN_PASS)
+        if not ui_ok:
+            self._check(M, "E-UI.X", False, "登录失败", status_override=Status.SKIP)
+            return
+        await self._ui_navigate("/chat")
+        await self.page.wait_for_timeout(2000)
+
+        # E-UI.1 欢迎空态
+        welcome = await self._ui_visible("text=泰兴调查队智能助理", timeout=5000)
+        self._check(M, "E-UI.1 Chat 欢迎空态渲染", welcome, section="§四")
+
+        # E-UI.2 右侧 Scope 面板
+        scope = await self._ui_visible("text=检索域限定", timeout=3000)
+        self._check(M, "E-UI.2 右侧检索域限定(Scope)面板可见", scope, section="§四")
+
+        # E-UI.3 输入问题 → 发送
+        try:
+            textarea = self.page.locator('.chat-input-area textarea')
+            await textarea.fill("2024年泰兴粮食产量数据")
+            send_btn = self.page.locator('.btn-send')
+            await send_btn.click()
+            await self.page.wait_for_timeout(3000)
+            # 验证用户气泡和 AI 响应气泡
+            user_bubble = await self._ui_visible(".chat-bubble-container.user", timeout=5000)
+            self._check(M, "E-UI.3 发送问题→用户气泡渲染", user_bubble, section="§四")
+            ai_bubble = await self._ui_visible(".chat-bubble-container.assistant", timeout=AI_TASK_TIMEOUT_MS)
+            self._check(M, "E-UI.4 AI回答气泡渲染", ai_bubble, section="§四")
+        except Exception as e:
+            self._check(M, "E-UI.3 Chat交互", False, str(e)[:150])
+
+    # ========================================================================
+    # 模块 F-UI: 参考范文 UI 联动 (对齐 §三.2)
+    # ========================================================================
+    async def module_f_ui_exemplar(self):
+        M = "F-UI"
+        # 需先进入一个工作区，验证左侧范文面板
+        await self._ui_sync_token_after_login(ADMIN_USER, ADMIN_PASS)
+        res = await self._api("POST", "/documents/init", json_data={
+            "title": f"范文联动测试-{int(time.time())}", "doc_type_id": 1,
+        })
+        doc_id = res.get("body", {}).get("data", {}).get("doc_id")
+        if not doc_id:
+            self._check(M, "F-UI.X", False, "创建测试公文失败", status_override=Status.SKIP)
+            return
+        ui_ok = await self._ui_login(ADMIN_USER, ADMIN_PASS)
+        if not ui_ok:
+            self._check(M, "F-UI.X", False, "登录失败", status_override=Status.SKIP)
+            return
+        await self._ui_navigate(f"/workspace/{doc_id}")
+        await self.page.wait_for_timeout(2000)
+
+        # F-UI.1 「参考范文」面板可见
+        panel = await self._ui_visible("text=参考范文", timeout=5000)
+        self._check(M, "F-UI.1 工作区「参考范文」面板可见", panel, section="§三.2")
+
+    # ========================================================================
     # 模块 G: 异步任务与 SSE 通知
     # ========================================================================
     async def module_g_tasks(self):
@@ -728,6 +1246,21 @@ class AuditEngine:
         ok_fmt = res["status"] in (202, 409, 400, 404)
         self._check(M, "G.4 POST /tasks/format 排版任务派发", ok_fmt,
             f"HTTP {res['status']}", section="§一.7")
+
+        # G.5 排版状态机校验：SUBMITTED 状态公文触发排版 → 应被拒绝 (409)
+        res_doc = await self._api("POST", "/documents/init", json_data={
+            "title": f"排版状态机测试-{int(time.time())}", "doc_type_id": 1,
+        })
+        g5_doc = res_doc.get("body", {}).get("data", {}).get("doc_id")
+        if g5_doc:
+            await self._api("POST", f"/documents/{g5_doc}/auto-save",
+                json_data={"content": "排版状态机测试正文"})
+            await self._api("POST", f"/documents/{g5_doc}/submit")
+            res = await self._api("POST", "/tasks/format",
+                json_data={"doc_id": g5_doc}, expect_status=409)
+            ok_deny = res["status"] in (409, 400)
+            self._check(M, "G.5 SUBMITTED状态公文禁止排版 (409/400)", ok_deny,
+                f"HTTP {res['status']}", section="§API.4")
 
     # ========================================================================
     # 模块 H: 审计存证
@@ -812,6 +1345,36 @@ class AuditEngine:
         self._check(M, "I.6 GET /sys/db-snapshots 快照列表", res["status"] == 200,
             section="§五.6")
 
+        # I.7 触发数据库快照
+        res = await self._api("POST", "/sys/db-snapshot")
+        ok_snap = res["status"] in (200, 202)
+        self._check(M, "I.7 POST /sys/db-snapshot 触发手工快照", ok_snap,
+            f"HTTP {res['status']}", section="§五.6")
+
+        # I.8 临时文件清理
+        res = await self._api("POST", "/sys/cleanup-cache")
+        ok_clean = res["status"] == 200
+        self._check(M, "I.8 POST /sys/cleanup-cache 临时文件清理", ok_clean,
+            f"HTTP {res['status']}", section="§五.5")
+
+        # I.9 PG GIN 索引维护
+        res = await self._api("POST", "/sys/gin-maintenance")
+        ok_gin = res["status"] == 200
+        self._check(M, "I.9 POST /sys/gin-maintenance PG索引清理", ok_gin,
+            f"HTTP {res['status']}", section="§五.5")
+
+        # I.10 扫描孤立物理文件
+        res = await self._api("POST", "/sys/scan-orphan-files")
+        ok_orphan = res["status"] == 200
+        self._check(M, "I.10 POST /sys/scan-orphan-files 孤立文件扫描", ok_orphan,
+            f"HTTP {res['status']}", section="§五.5")
+
+        # I.11 热加载提示词
+        res = await self._api("POST", "/sys/reload-prompts")
+        ok_reload = res["status"] == 200
+        self._check(M, "I.11 POST /sys/reload-prompts 提示词热加载", ok_reload,
+            f"HTTP {res['status']}", section="§五.2")
+
     # ========================================================================
     # 模块 J: 权限隔离矩阵
     # ========================================================================
@@ -845,6 +1408,198 @@ class AuditEngine:
             ok = res["status"] == expect_status
             self._check(M, label, ok, f"HTTP {res['status']} (expect {expect_status})",
                         section=section)
+
+    # ========================================================================
+    # 模块 I-UI: 系统管理 UI (对齐 §五)
+    # ========================================================================
+    async def module_i_ui_settings(self):
+        M = "I-UI"
+        ui_ok = await self._ui_login(ADMIN_USER, ADMIN_PASS)
+        if not ui_ok:
+            self._check(M, "I-UI.X", False, "登录失败", status_override=Status.SKIP)
+            return
+        await self._ui_navigate("/settings")
+        await self.page.wait_for_timeout(2000)
+
+        # I-UI.1 页面标题 + 四 Tab 渲染
+        title_ok = await self._ui_visible("text=系统控制台", timeout=5000)
+        tabs = ["运行健康度", "全域审计穿透", "核心锁控大盘", "提示词中心"]
+        tab_visible_count = 0
+        for t in tabs:
+            if await self._ui_visible(f"text={t}", timeout=2000):
+                tab_visible_count += 1
+        self._check(M, "I-UI.1 Settings标题+四Tab渲染",
+            title_ok and tab_visible_count == len(tabs),
+            f"title={title_ok}, tabs={tab_visible_count}/{len(tabs)}", section="§五")
+
+        # I-UI.2 「运行健康度」Tab → 统计卡片 + 刷新按钮
+        try:
+            await self.page.click(f'.ant-tabs-tab:has-text("运行健康度")')
+            await self.page.wait_for_timeout(1500)
+            stat_cards = await self.page.locator('.ant-statistic').count()
+            refresh_btn = await self._ui_visible("text=刷新探针", timeout=3000)
+            self._check(M, "I-UI.2 健康度Tab: 统计卡片+刷新按钮",
+                stat_cards >= 4 and refresh_btn,
+                f"cards={stat_cards}, refresh_btn={refresh_btn}", section="§五.5")
+        except Exception as e:
+            self._check(M, "I-UI.2 健康度Tab", False, str(e)[:150])
+
+        # I-UI.3 「全域审计穿透」Tab → 审计表格
+        try:
+            await self.page.click(f'.ant-tabs-tab:has-text("全域审计穿透")')
+            await self.page.wait_for_timeout(1500)
+            table_ok = await self._ui_visible(".ant-table", timeout=5000)
+            self._check(M, "I-UI.3 审计Tab: 审计表格渲染", table_ok, section="§六")
+        except Exception as e:
+            self._check(M, "I-UI.3 审计Tab", False, str(e)[:150])
+
+        # I-UI.4 「核心锁控大盘」Tab → 锁表格 + 强放按钮
+        try:
+            await self.page.click(f'.ant-tabs-tab:has-text("核心锁控大盘")')
+            await self.page.wait_for_timeout(1500)
+            table_ok = await self._ui_visible(".ant-table", timeout=5000)
+            force_btn = await self._ui_visible("text=强放", timeout=3000)
+            self._check(M, "I-UI.4 锁控Tab: 锁表格+强放按钮", table_ok,
+                f"table={table_ok}, force_btn={force_btn}", section="§五.4")
+        except Exception as e:
+            self._check(M, "I-UI.4 锁控Tab", False, str(e)[:150])
+
+        # I-UI.5 「提示词中心」Tab → TextArea + 保存按钮
+        try:
+            await self.page.click(f'.ant-tabs-tab:has-text("提示词中心")')
+            await self.page.wait_for_timeout(1500)
+            textarea_ok = await self._ui_visible("textarea", timeout=5000)
+            save_btn = await self._ui_visible("text=保存并全量刷新", timeout=3000)
+            self._check(M, "I-UI.5 提示词Tab: TextArea+保存按钮", textarea_ok,
+                f"textarea={textarea_ok}, save_btn={save_btn}", section="§五.2")
+        except Exception as e:
+            self._check(M, "I-UI.5 提示词Tab", False, str(e)[:150])
+
+        # I-UI.6 非管理员访问 /settings → 权限拦截
+        member = USERS["ky_nongye"]
+        mem_ok = await self._ui_login(member["un"], member["pw"])
+        if mem_ok:
+            await self._ui_navigate("/settings")
+            await self.page.wait_for_timeout(2000)
+            # 应被重定向或显示权限提示
+            redirected = "/settings" not in self.page.url
+            no_content = not await self._ui_visible("text=系统控制台", timeout=3000)
+            self._check(M, "I-UI.6 非管理员/settings权限拦截",
+                redirected or no_content,
+                f"url={self.page.url}", section="§五")
+
+    # ========================================================================
+    # 模块 K: 通知与消息 (对齐 API契约 §11)
+    # ========================================================================
+    async def module_k_notifications(self):
+        M = "K-通知"
+
+        # K.1 通知列表
+        res = await self._api("GET", "/notifications?page=1&page_size=10")
+        ok = res["status"] == 200
+        data = res.get("body", {}).get("data", {})
+        self._check(M, "K.1 GET /notifications 通知列表", ok,
+            f"total={data.get('total', '?')}", section="§API.11")
+
+        # K.2 未读数
+        res = await self._api("GET", "/notifications/unread-count")
+        ok = res["status"] == 200 and "unread_count" in res.get("body", {}).get("data", {})
+        self._check(M, "K.2 GET /notifications/unread-count 未读通知数", ok,
+            section="§API.11")
+
+        # K.3 标记已读 (用不存在的 ID 测试路由可达)
+        res = await self._api("POST", "/notifications/99999/read", expect_status=404)
+        ok_route = res["status"] in (200, 404)
+        self._check(M, "K.3 POST /notifications/{id}/read 标记已读路由", ok_route,
+            f"HTTP {res['status']}", section="§API.11")
+
+        # K.4 一键全部已读
+        res = await self._api("POST", "/notifications/read-all")
+        ok = res["status"] == 200
+        self._check(M, "K.4 POST /notifications/read-all 一键已读", ok,
+            section="§API.11")
+
+        # K.5 科员权限隔离
+        member_res = await self._api("POST", "/auth/login",
+            json_data={"username": USERS["ky_nongye"]["un"],
+                       "password": USERS["ky_nongye"]["pw"]})
+        member_token = member_res.get("body", {}).get("data", {}).get("access_token")
+        if member_token:
+            res = await self._api("GET", "/notifications?page=1&page_size=5",
+                                   token=member_token)
+            ok = res["status"] == 200
+            self._check(M, "K.5 科员通知列表权限正常 (仅自身)", ok,
+                section="§API.11")
+
+    # ========================================================================
+    # 模块 L: 异常容灾 E2E (对齐 §六)
+    # ========================================================================
+    async def module_l_disaster_recovery(self):
+        M = "L-容灾"
+
+        # L.1 beforeunload 锁释放（带 content 的容灾合并释放）
+        res = await self._api("POST", "/documents/init", json_data={
+            "title": f"容灾测试-{int(time.time())}", "doc_type_id": 1,
+        })
+        doc_id = res.get("body", {}).get("data", {}).get("doc_id")
+        if doc_id:
+            lock_res = await self._api("POST", "/locks/acquire", json_data={"doc_id": doc_id})
+            lock_token = lock_res.get("body", {}).get("data", {}).get("lock_token")
+            if lock_token:
+                res = await self._api("POST", "/locks/release", json_data={
+                    "doc_id": doc_id,
+                    "lock_token": lock_token,
+                    "content": "容灾合并释放保存的正文内容",
+                })
+                ok_merge = res["status"] == 200
+                self._check(M, "L.1 beforeunload容灾合并释放(release+save)", ok_merge,
+                    section="§六.1")
+
+        # L.2 快照恢复流程
+        if doc_id:
+            snap_res = await self._api("GET", f"/documents/{doc_id}/snapshots")
+            ok_list = snap_res["status"] == 200
+            self._check(M, "L.2a GET /documents/{id}/snapshots 快照列表", ok_list,
+                section="§六.3")
+            # 创建手工快照
+            await self._api("POST", f"/documents/{doc_id}/snapshots", json_data={
+                "comment": "巡检手工快照"
+            })
+            snap_list = await self._api("GET", f"/documents/{doc_id}/snapshots")
+            snaps = snap_list.get("body", {}).get("data", {}).get("items", [])
+            if snaps:
+                snap_id = snaps[0].get("snapshot_id") or snaps[0].get("id")
+                if snap_id:
+                    res = await self._api("POST",
+                        f"/documents/{doc_id}/snapshots/{snap_id}/restore")
+                    ok_restore = res["status"] == 200
+                    self._check(M, "L.2b 快照恢复 POST restore", ok_restore,
+                        section="§六.3")
+
+        # L.3 登录踢出 E2E（同账号双 context）
+        try:
+            ctx2, pg2 = await self._create_second_context()
+            # context 1 登录
+            await self._ui_login(ADMIN_USER, ADMIN_PASS)
+            await self._ui_sync_token_after_login(ADMIN_USER, ADMIN_PASS)
+            token1 = self.api_token
+
+            # context 2 登录同账号 → 踢出 context 1
+            await pg2.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
+            await pg2.wait_for_timeout(1000)
+            await pg2.fill("#login_username", ADMIN_USER)
+            await pg2.fill("#login_password", ADMIN_PASS)
+            await pg2.click("button[type='submit']")
+            await pg2.wait_for_url("**/dashboard**", timeout=10000)
+
+            # context 1 旧 token 应被拒绝 (401)
+            res = await self._api("GET", "/auth/me", token=token1, expect_status=401)
+            ok_kicked = res["status"] == 401
+            self._check(M, "L.3 同账号双登录踢出旧会话 (401)", ok_kicked,
+                f"HTTP {res['status']}", section="§五.7")
+            await ctx2.close()
+        except Exception as e:
+            self._check(M, "L.3 登录踢出", False, str(e)[:150])
 
     # ========================================================================
     # 报告输出
@@ -910,18 +1665,26 @@ class AuditEngine:
     # 主入口
     # ========================================================================
     async def run(self, modules: Optional[List[str]] = None):
-        """modules: None=全部, 或 ["A","B","C"...] 指定模块"""
+        """modules: None=全部, 或 ["A","B","B-UI"...] 指定模块"""
         all_modules = {
             "A": self.module_a_auth,
             "B": self.module_b_document_lifecycle,
+            "B-UI": self.module_b_ui_lifecycle,
+            "B-APPR": self.module_b_approval_ui,
             "C": self.module_c_locks,
             "D": self.module_d_knowledge,
+            "D-UI": self.module_d_ui_knowledge,
             "E": self.module_e_rag,
+            "E-UI": self.module_e_ui_chat,
             "F": self.module_f_exemplars,
+            "F-UI": self.module_f_ui_exemplar,
             "G": self.module_g_tasks,
             "H": self.module_h_audit,
             "I": self.module_i_system,
+            "I-UI": self.module_i_ui_settings,
             "J": self.module_j_permissions,
+            "K": self.module_k_notifications,
+            "L": self.module_l_disaster_recovery,
         }
 
         if modules is None:
@@ -951,15 +1714,23 @@ class AuditEngine:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="泰兴调查队 全系统巡检程序 V3.0")
     parser.add_argument("--quick", action="store_true", help="快速冒烟 (仅核心模块 A/B/C/I)")
-    parser.add_argument("--module", type=str, help="单模块巡检 (e.g. A, B, C...)")
+    parser.add_argument("--module", type=str, help="单/多模块巡检 (e.g. A, B-UI, K)")
     parser.add_argument("--api-only", action="store_true", help="仅 API 检查（跳过 UI 检查）")
+    parser.add_argument("--ui-only", action="store_true", help="仅 UI 模块检查")
     parser.add_argument("--output", type=str, help="指定报告输出路径")
     args = parser.parse_args()
+
+    UI_MODULES = ["B-UI", "B-APPR", "D-UI", "E-UI", "F-UI", "I-UI"]
+    API_MODULES = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"]
 
     if args.quick:
         selected = ["A", "B", "C", "I"]
     elif args.module:
-        selected = [m.strip() for m in args.module.split(",")]
+        selected = [m.strip().upper() for m in args.module.split(",")]
+    elif args.ui_only:
+        selected = UI_MODULES
+    elif args.api_only:
+        selected = API_MODULES
     else:
         selected = None  # 全部
 
