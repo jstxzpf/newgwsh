@@ -29,7 +29,7 @@ async def get_admin_user(current_user: SystemUser = Depends(get_current_user)):
 # ════════════════════════════════════════════════════════════
 
 @router.get("/status")
-async def system_status(db: AsyncSession = Depends(get_db)):
+async def system_status(admin_user: SystemUser = Depends(get_admin_user), db: AsyncSession = Depends(get_db)):
     # Real probe: check DB, Redis, and optional Ollama connectivity
     db_ok = False
     try:

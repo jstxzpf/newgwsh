@@ -302,6 +302,11 @@ class AuditEngine:
 
         # A.6 防渗漏水印存在 (需通过 UI 登录后渲染)
         ui_ok = await self._ui_login(ADMIN_USER, ADMIN_PASS)
+        # UI 登录会清除旧会话（单一设备登录铁律 §五.7），须重新获取 API token
+        if ui_ok:
+            res = await self._api("POST", "/auth/login",
+                json_data={"username": ADMIN_USER, "password": ADMIN_PASS})
+            self.api_token = res.get("body", {}).get("data", {}).get("access_token", self.api_token)
         if ui_ok:
             watermark_exists = await self.page.evaluate(
                 "() => {"
@@ -368,35 +373,48 @@ class AuditEngine:
         self._check(M, "B.5 状态机校验: DRAFTING→SUBMITTED", ok,
             f"actual={status_val}", section="§一.8")
 
-        # B.6 签批通过 → APPROVED（终态）
+        # B.6 科长审核通过 → REVIEWED（role_level>=5）
         res = await self._api("POST", f"/approval/{doc_id}/review", json_data={
-            "action": "APPROVE", "comments": "同意签发"
+            "action": "APPROVE", "comments": "建议签发"
         })
         ok = res["status"] == 200
-        self._check(M, "B.6 POST /approval/{id}/review APPROVE → APPROVED", ok,
+        self._check(M, "B.6 POST /approval/{id}/review 科长审核 → REVIEWED", ok,
             section="§一.9")
 
-        # B.7 验证终态不可变
+        # B.7 验证 REVIEWED 中间态
+        res = await self._api("GET", f"/documents/{doc_id}")
+        status_val = res.get("body", {}).get("data", {}).get("status")
+        ok = status_val == "REVIEWED"
+        self._check(M, "B.7 状态机校验: SUBMITTED→REVIEWED", ok,
+            f"actual={status_val}", section="§一.9")
+
+        # B.8 局长签发 → APPROVED（终态, role_level>=99）
+        res = await self._api("POST", f"/approval/{doc_id}/issue")
+        ok = res["status"] == 200 and res.get("body", {}).get("data", {}).get("new_status") == "APPROVED"
+        self._check(M, "B.8 POST /approval/{id}/issue 局长签发 → APPROVED", ok,
+            section="§一.9")
+
+        # B.9 验证终态 APPROVED
         res = await self._api("GET", f"/documents/{doc_id}")
         status_val = res.get("body", {}).get("data", {}).get("status")
         ok = status_val == "APPROVED"
-        self._check(M, "B.7 状态机校验: SUBMITTED→APPROVED (终态)", ok,
+        self._check(M, "B.9 状态机校验: REVIEWED→APPROVED (终态)", ok,
             f"actual={status_val}", section="§一.9")
 
-        # B.8 终态提交被拒
+        # B.10 终态提交被拒
         res = await self._api("POST", f"/documents/{doc_id}/submit", expect_status=409)
         ok = res["status"] == 409
-        self._check(M, "B.8 终态公文禁止重新提交 (409)", ok,
+        self._check(M, "B.10 终态公文禁止重新提交 (409)", ok,
             f"HTTP {res['status']}", section="§一.9")
 
-        # B.9 SIP 存证校验
+        # B.11 SIP 存证校验 (签发时生成 SIP hash)
         res = await self._api("GET", f"/documents/{doc_id}/verify-sip")
         ok = res["status"] == 200
         sip_match = res.get("body", {}).get("data", {}).get("match")
-        self._check(M, "B.9 SIP 存证校验 GET /documents/{id}/verify-sip", ok and sip_match,
+        self._check(M, "B.11 SIP 存证校验 GET /documents/{id}/verify-sip", ok and sip_match,
             f"match={sip_match}", section="§六.6")
 
-        # B.10 驳回+回退流程 — 需要新建第二个文档
+        # B.12 驳回+回退流程 — 需要新建第二个文档
         res2 = await self._api("POST", "/documents/init", json_data={
             "title": f"驳回回退测试-{int(time.time())}", "doc_type_id": 1,
         })
@@ -407,18 +425,18 @@ class AuditEngine:
                 "action": "REJECT", "comments": "需补充数据来源"
             })
             ok_reject = res["status"] == 200
-            self._check(M, "B.10a POST /approval REJECT (驳回)", ok_reject,
+            self._check(M, "B.12a POST /approval REJECT (驳回)", ok_reject,
                 section="§一.9")
 
             res = await self._api("GET", f"/documents/{doc_id2}")
             status_val = res.get("body", {}).get("data", {}).get("status")
             ok_rejected = status_val == "REJECTED"
-            self._check(M, "B.10b 状态机: SUBMITTED→REJECTED", ok_rejected,
+            self._check(M, "B.12b 状态机: SUBMITTED→REJECTED", ok_rejected,
                 f"actual={status_val}", section="§一.9")
 
             res = await self._api("POST", f"/documents/{doc_id2}/revise")
             ok_revise = res["status"] == 200 and res.get("body", {}).get("data", {}).get("new_status") == "DRAFTING"
-            self._check(M, "B.10c POST /documents/{id}/revise 回退→DRAFTING", ok_revise,
+            self._check(M, "B.12c POST /documents/{id}/revise 回退→DRAFTING", ok_revise,
                 section="§一.11")
 
     # ========================================================================
@@ -704,9 +722,9 @@ class AuditEngine:
         self._check(M, "G.3 POST /tasks/{id}/retry 管理员重试失败任务路由可用",
             ok_retry, f"HTTP {res['status']}", section="§五.4")
 
-        # G.4 排版任务触发 (doc_id 需作为 query param，非 JSON body)
+        # G.4 排版任务触发 (需 JSON body 传递 doc_id)
         dummy_doc = "00000000-0000-0000-0000-000000000000"
-        res = await self._api("POST", f"/tasks/format?doc_id={dummy_doc}")
+        res = await self._api("POST", "/tasks/format", json_data={"doc_id": dummy_doc})
         ok_fmt = res["status"] in (202, 409, 400, 404)
         self._check(M, "G.4 POST /tasks/format 排版任务派发", ok_fmt,
             f"HTTP {res['status']}", section="§一.7")
