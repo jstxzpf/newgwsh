@@ -47,7 +47,10 @@ export const GlobalTaskWatcher: React.FC = () => {
 
       es.addEventListener('task.progress', (e: any) => {
         const data = JSON.parse(e.data);
-        console.log(`Task ${taskId} progress: ${data.progress_pct}%`);
+        // 知识库上下文过期告警：对用户可见
+        if (data.message && data.message.startsWith('⚠')) {
+          notification.warning({ message: '上下文变更提醒', description: data.message, duration: 8 });
+        }
       });
 
       es.onerror = () => {

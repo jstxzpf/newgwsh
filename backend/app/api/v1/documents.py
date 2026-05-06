@@ -5,7 +5,7 @@ from app.core.database import get_db
 from app.models.user import SystemUser
 from app.models.document import Document, DocumentSnapshot, DocumentType
 from app.models.system import NBSWorkflowAudit
-from app.models.enums import WorkflowNodeId
+from app.models.enums import WorkflowNodeId, DocumentStatus
 from app.schemas.document import DocumentInitRequest, AutoSaveRequest, ApplyPolishRequest, SnapshotCreateRequest
 from app.core.exceptions import BusinessException
 from app.api.dependencies import get_current_user
@@ -194,7 +194,9 @@ async def apply_polish(doc_id: str, req: ApplyPolishRequest, current_user: Syste
     doc = result.scalars().first()
     if not doc:
         raise BusinessException(404, "公文不存在")
-    
+    if doc.status != DocumentStatus.DRAFTING:
+        raise BusinessException(409, "当前状态不可应用润色")
+
     await DocumentService.apply_polish(db, doc, req.final_content, current_user.user_id)
     await db.commit()
     return {"code": 200, "message": "success", "data": None}
@@ -204,6 +206,8 @@ async def discard_polish(doc_id: str, current_user: SystemUser = Depends(get_cur
     result = await db.execute(select(Document).where(Document.doc_id == doc_id))
     doc = result.scalars().first()
     if doc:
+        if doc.creator_id != current_user.user_id and current_user.role_level < 99:
+            raise BusinessException(403, "无权丢弃他人润色结果")
         doc.ai_polished_content = None
         doc.draft_suggestion = None
         await db.commit()

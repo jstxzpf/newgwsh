@@ -9,20 +9,23 @@ import uuid
 class TaskService:
     @staticmethod
     async def trigger_polish_task(db: AsyncSession, doc_id: str, creator_id: int, input_params: dict) -> str:
-        # 幂等拦截
+        # 锁住文档行以串行化并发润色请求（防止幂等检查竞态）
+        doc_result = await db.execute(
+            select(Document).where(Document.doc_id == doc_id).with_for_update()
+        )
+        doc = doc_result.scalars().first()
+        if not doc or doc.status != "DRAFTING":
+            raise BusinessException(409, "当前状态不可润色")
+
+        # 幂等拦截（在文档行锁保护下安全）
         result = await db.execute(select(AsyncTask).where(
-            AsyncTask.doc_id == doc_id, 
+            AsyncTask.doc_id == doc_id,
             AsyncTask.task_type == "POLISH",
             AsyncTask.task_status.in_(["QUEUED", "PROCESSING"])
         ))
         existing_task = result.scalars().first()
         if existing_task:
             return existing_task.task_id
-
-        doc_result = await db.execute(select(Document).where(Document.doc_id == doc_id))
-        doc = doc_result.scalars().first()
-        if not doc or doc.status != "DRAFTING":
-            raise BusinessException(409, "当前状态不可润色")
 
         task_id = str(uuid.uuid4())
         new_task = AsyncTask(
@@ -33,7 +36,7 @@ class TaskService:
             input_params=input_params
         )
         db.add(new_task)
-        
+
         # 派发 Celery
         process_polish_task.delay(task_id, doc_id)
         return task_id

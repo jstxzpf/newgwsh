@@ -114,6 +114,17 @@ def process_polish_task(self, task_id: str, doc_id: str):
                 doc.draft_suggestion = polished
                 _mark_task_completed(session, task_id, polished[:200])
 
+                # 创建通知（与排版任务对齐：用户离开页面后也能感知完成）
+                from app.models.system import UserNotification
+                from app.models.enums import NotificationType
+                notif = UserNotification(
+                    user_id=doc.creator_id,
+                    doc_id=doc_id,
+                    type=NotificationType.TASK_COMPLETED,
+                    content=f"公文「{doc.title}」AI 润色完成",
+                )
+                session.add(notif)
+
         except Exception as e:
             session.rollback()
             if self.request.retries >= self.max_retries:

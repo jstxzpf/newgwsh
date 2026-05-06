@@ -636,13 +636,11 @@ class AuditEngine:
         # B-UI.3 填写标题 + 选择文种 + 确认创建
         try:
             await self.page.fill('.ant-modal input[placeholder="请输入公文标题"]', test_title)
-            await self.page.click('.ant-select')
-            await self.page.wait_for_timeout(500)
-            await self.page.click('text=通知')
-            await self.page.wait_for_timeout(500)
-            # 点击表单标签确保下拉框关闭且焦点回到 Modal
-            await self.page.click('.ant-modal-header')
-            await self.page.wait_for_timeout(200)
+            # Ant Design 5+ Select: 点击打开下拉，键盘选择（Enter 选中并关闭下拉）
+            await self.page.locator('.ant-modal .ant-select').first.click()
+            await self.page.wait_for_timeout(300)
+            await self.page.keyboard.press('Enter')  # 选中高亮项（通知）并关闭下拉
+            await self.page.wait_for_timeout(300)
             await self.page.click('.ant-modal-footer .ant-btn-primary')
             await self.page.wait_for_url("**/workspace/**", timeout=10000)
             await self.page.wait_for_timeout(2000)
@@ -864,6 +862,9 @@ class AuditEngine:
     # ========================================================================
     async def module_c_locks(self):
         M = "C-锁控"
+
+        # 刷新管理员 API token，避免被 B-APPR 的 _ui_login 覆盖后导致 403
+        await self._ui_sync_token_after_login(ADMIN_USER, ADMIN_PASS)
 
         # 先创建测试公文
         res = await self._api("POST", "/documents/init", json_data={
@@ -1523,7 +1524,7 @@ class AuditEngine:
         try:
             await self.page.click(f'.ant-tabs-tab:has-text("核心锁控大盘")')
             await self.page.wait_for_timeout(1500)
-            table_ok = await self._ui_visible(".ant-table", timeout=5000)
+            table_ok = await self._ui_visible("table", timeout=5000)
             force_btn = await self._ui_visible("text=强放", timeout=3000)
             self._check(M, "I-UI.4 锁控Tab: 锁表格+强放按钮", table_ok,
                 f"table={table_ok}, force_btn={force_btn}", section="§五.4")

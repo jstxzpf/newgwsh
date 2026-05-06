@@ -175,7 +175,8 @@ export const Workspace: React.FC = () => {
         setCurrentTaskId(null);
         pendingTaskTypeRef.current = null;
       }, 300000);
-    } catch (e) {
+    } catch (e: any) {
+      message.error('AI 润色请求失败: ' + (e.response?.data?.message || '请检查服务状态后重试'));
       setBusy(false);
     }
   };
@@ -287,7 +288,7 @@ export const Workspace: React.FC = () => {
             className="btn-polish" 
             icon={<BulbOutlined />}
             onClick={handlePolish}
-            loading={isBusy && viewMode === 'SINGLE'}
+            loading={isBusy && pendingTaskTypeRef.current === 'polish'}
             disabled={isReadOnly}
           >
             AI 智能润色
