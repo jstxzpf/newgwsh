@@ -52,3 +52,18 @@ async def stream_generate(prompt: str, model: str = "qwen3.5:9b", timeout: int =
                         yield chunk.get("response", "")
                     except json.JSONDecodeError:
                         continue
+
+
+OLLAMA_EMBED = f"{settings.OLLAMA_BASE_URL}/api/embed"
+
+
+async def get_embedding(text: str, model: str = "bge-m3", timeout: int = 30) -> list[float]:
+    """Get text embedding from Ollama. Returns 1024-dim vector from bge-m3."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(OLLAMA_EMBED, json={
+            "model": model,
+            "input": text,
+        })
+        resp.raise_for_status()
+        data = resp.json()
+        return data["embeddings"][0]

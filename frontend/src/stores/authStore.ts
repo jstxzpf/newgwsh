@@ -7,6 +7,7 @@ interface UserInfo {
   role_level: number;
   dept_id: number | null;
   department_name: string | null;
+  is_dept_head: boolean;
 }
 
 interface AuthState {

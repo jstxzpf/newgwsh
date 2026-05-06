@@ -46,6 +46,16 @@ export const Documents: React.FC = () => {
     fetchDocs();
   }, [page, statusFilter]);
 
+  const handleRevise = async (docId: string) => {
+    try {
+      await apiClient.post(`/documents/${docId}/revise`);
+      message.success('已获取编辑锁，可重新修改公文');
+      navigate(`/workspace/${docId}`);
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || '回退失败，请重试');
+    }
+  };
+
   const handleDelete = (docId: string) => {
     Modal.confirm({
       title: '确认删除此公文？',
@@ -79,9 +89,11 @@ export const Documents: React.FC = () => {
       render: (status: string) => {
         const config: any = {
           'DRAFTING': { color: 'blue', text: '起草中' },
-          'SUBMITTED': { color: 'orange', text: '待审批' },
-          'APPROVED': { color: 'green', text: '已通过' },
+          'SUBMITTED': { color: 'orange', text: '待科长审核' },
+          'REVIEWED': { color: 'cyan', text: '科长已审' },
+          'APPROVED': { color: 'green', text: '已签发' },
           'REJECTED': { color: 'red', text: '已驳回' },
+          'ARCHIVED': { color: 'default', text: '已归档' },
         };
         const item = config[status] || { color: 'default', text: status };
         return <Tag color={item.color}>{item.text}</Tag>;
@@ -106,7 +118,7 @@ export const Documents: React.FC = () => {
             {record.status === 'DRAFTING' ? '编辑' : '查看'}
           </Button>
           {record.status === 'REJECTED' && (
-             <Button type="link" onClick={() => navigate(`/workspace/${record.doc_id}`)}>前往修改</Button>
+             <Button type="link" onClick={() => handleRevise(record.doc_id)}>前往修改</Button>
           )}
           <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record.doc_id)} />
         </Space>
@@ -126,9 +138,11 @@ export const Documents: React.FC = () => {
             onChange={setStatusFilter}
           >
             <Select.Option value="DRAFTING">起草中</Select.Option>
-            <Select.Option value="SUBMITTED">待审批</Select.Option>
-            <Select.Option value="APPROVED">已通过</Select.Option>
+            <Select.Option value="SUBMITTED">待科长审核</Select.Option>
+            <Select.Option value="REVIEWED">科长已审</Select.Option>
+            <Select.Option value="APPROVED">已签发</Select.Option>
             <Select.Option value="REJECTED">已驳回</Select.Option>
+            <Select.Option value="ARCHIVED">已归档</Select.Option>
           </Select>
           <Input placeholder="搜索公文..." prefix={<SearchOutlined />} style={{ width: 250 }} />
         </Space>

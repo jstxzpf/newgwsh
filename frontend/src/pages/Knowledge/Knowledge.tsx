@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, Tabs, Card, Table, Tag, Button, Space, Typography, Breadcrumb, Modal, Upload, message, Tooltip, Drawer, Form, Select, Input } from 'antd';
-import { 
-  FolderOutlined, 
-  FileTextOutlined, 
-  UploadOutlined, 
-  DeleteOutlined, 
+import {
+  FolderOutlined,
+  FileTextOutlined,
+  UploadOutlined,
+  DeleteOutlined,
   CloudSyncOutlined,
   LockOutlined,
   SafetyCertificateOutlined,
-  PlusOutlined
+  PlusOutlined,
+  ReloadOutlined
 } from '@ant-design/icons';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
@@ -54,6 +55,16 @@ export const Knowledge: React.FC = () => {
     });
   };
 
+  const handleReparse = async (kbId: number) => {
+    try {
+      await apiClient.post(`/kb/${kbId}/reparse`);
+      message.success('重新解析任务已派发');
+      fetchHierarchy();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || '重新解析失败');
+    }
+  };
+
   const columns = [
     {
       title: '名称',
@@ -94,6 +105,11 @@ export const Knowledge: React.FC = () => {
       key: 'action',
       render: (_: any, record: any) => (
         <Space size="middle">
+          {record.parse_status === 'FAILED' && (
+            <Tooltip title="重新解析">
+              <Button type="text" icon={<ReloadOutlined />} onClick={() => handleReparse(record.kb_id)} />
+            </Tooltip>
+          )}
           <Tooltip title="替换上传">
              <Button type="text" icon={<CloudSyncOutlined />} />
           </Tooltip>

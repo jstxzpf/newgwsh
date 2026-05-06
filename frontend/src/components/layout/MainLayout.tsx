@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Layout, Menu, Space, Badge, Divider, Typography } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
@@ -16,9 +16,16 @@ export const MainLayout: React.FC = () => {
   const userInfo = useAuthStore(state => state.userInfo);
   const content = useEditorStore(state => state.content);
   const [aiStatus, setAiStatus] = useState<'online' | 'offline'>('offline');
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/notifications/unread-count');
+      setUnreadCount(res.data.data?.unread_count ?? 0);
+    } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
-    // 全局探针 (§三.1)
     const checkStatus = async () => {
       try {
         const res = await apiClient.get('/sys/status');
@@ -29,9 +36,10 @@ export const MainLayout: React.FC = () => {
       }
     };
     checkStatus();
-    const timer = setInterval(checkStatus, 30000);
+    fetchUnreadCount();
+    const timer = setInterval(() => { checkStatus(); fetchUnreadCount(); }, 30000);
     return () => clearInterval(timer);
-  }, []);
+  }, [fetchUnreadCount]);
 
   const wordCount = countWords(content);
   const isWorkspace = location.pathname.includes('/workspace');
@@ -44,7 +52,7 @@ export const MainLayout: React.FC = () => {
           <div style={{ fontWeight: 'bold', fontSize: '18px', color: TAIXING_BRAND.primaryColor }}>{TAIXING_BRAND.fullName}</div>
         </div>
         <Space size="large">
-           <Badge count={0} dot offset={[-2, 0]}>
+           <Badge count={unreadCount} offset={[-2, 0]}>
              <span style={{ fontSize: '18px', cursor: 'pointer' }}>🔔</span>
            </Badge>
            <span style={{ fontWeight: 500 }}>{userInfo?.full_name} ({userInfo?.department_name})</span>

@@ -5,28 +5,32 @@ from app.models.system import NBSWorkflowAudit
 from app.models.enums import WorkflowNodeId, KBTypeEnum, KBTier, DataSecurityLevel
 from datetime import datetime, timezone
 import hashlib
+import os
 
 class KnowledgeService:
     @staticmethod
     async def handle_upload(
-        db: AsyncSession, 
-        filename: str, 
-        content: bytes, 
-        parent_id: int | None, 
-        kb_tier: KBTier, 
-        security_level: DataSecurityLevel, 
-        user_id: int, 
+        db: AsyncSession,
+        filename: str,
+        content: bytes,
+        parent_id: int | None,
+        kb_tier: KBTier,
+        security_level: DataSecurityLevel,
+        user_id: int,
         dept_id: int | None
-    ) -> int:
+    ) -> tuple[int, bool]:
+        """Returns (kb_id, needs_parse)."""
         # 1. 物理去重预检 (Task 4 §三.5)
         content_hash = hashlib.sha256(content).hexdigest()
-        
+
         result = await db.execute(select(KnowledgePhysicalFile).where(KnowledgePhysicalFile.content_hash == content_hash))
         physical_file = result.scalars().first()
-        
+
         if not physical_file:
-            # 模拟存储物理文件
             file_path = f"/app/data/uploads/{content_hash}_{filename}"
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "wb") as f:
+                f.write(content)
             physical_file = KnowledgePhysicalFile(
                 content_hash=content_hash,
                 file_path=file_path,
@@ -34,9 +38,9 @@ class KnowledgeService:
             )
             db.add(physical_file)
             await db.flush()
-        
+
         # 2. 逻辑去重检查 (§三.5)
-        # 铁律：防止相同用户在相同层级重复挂载相同物理文件引发 idx_kb_personal_unique 冲突
+        # 允许安全等级升级：同名同层文件若等级不同则更新等级并强制重新解析
         existing_node_query = select(KnowledgeBaseHierarchy).where(
             KnowledgeBaseHierarchy.physical_file_id == physical_file.file_id,
             KnowledgeBaseHierarchy.owner_id == user_id,
@@ -45,17 +49,21 @@ class KnowledgeService:
         )
         existing_node = (await db.execute(existing_node_query)).scalars().first()
         if existing_node:
-            return existing_node.kb_id
+            if existing_node.security_level != security_level:
+                existing_node.security_level = security_level
+                existing_node.parse_status = "UPLOADED"
+                return existing_node.kb_id, True
+            return existing_node.kb_id, False
 
         # 3. 安全等级一致性校验 (§三.2 铁律)
-        # 检查是否有现成的 Ready 切片且安全等级一致
+        # 必须安全等级完全一致才可复用已有切片，否则强制重新解析
         reuse_possible = False
         existing_chunks_query = select(KnowledgeChunk).where(
             KnowledgeChunk.physical_file_id == physical_file.file_id,
             KnowledgeChunk.is_deleted == False,
-            KnowledgeChunk.security_level == security_level # 必须完全一致才可复用
+            KnowledgeChunk.security_level == security_level
         ).limit(1)
-        
+
         existing_chunk = (await db.execute(existing_chunks_query)).scalars().first()
         if existing_chunk:
             reuse_possible = True
@@ -74,8 +82,8 @@ class KnowledgeService:
         )
         db.add(new_node)
         await db.flush()
-        
-        return new_node.kb_id
+
+        return new_node.kb_id, not reuse_possible
 
     @staticmethod
     async def delete_node(db: AsyncSession, kb_id: int, user_id: int):
@@ -116,7 +124,7 @@ class KnowledgeService:
         
         # 4. 记录审计
         audit = NBSWorkflowAudit(
-            doc_id="N/A", # 知识库操作无 doc_id
+            doc_id=None, # 知识库操作无 doc_id
             workflow_node_id=99, # 预留删除节点
             operator_id=user_id,
             action_details={"target_kb_ids": target_ids, "action": "CASCADE_SOFT_DELETE"}

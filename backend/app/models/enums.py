@@ -3,8 +3,10 @@ import enum
 class DocumentStatus(str, enum.Enum):
     DRAFTING = "DRAFTING"
     SUBMITTED = "SUBMITTED"
+    REVIEWED = "REVIEWED"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    ARCHIVED = "ARCHIVED"
 
 class KBTier(str, enum.Enum):
     BASE = "BASE"
@@ -48,10 +50,15 @@ class WorkflowNodeId(int, enum.Enum):
     SNAPSHOT_RESTORE = 12
     POLISH_REQUESTED = 20
     POLISH_APPLIED = 21
+    FORMAT_REQUESTED = 22
+    FORMAT_COMPLETED = 23
     SUBMITTED = 30
+    REVIEWED = 31
     APPROVED = 40
     REJECTED = 41
     REVISION = 42
+    ISSUED = 43
+    ARCHIVED = 50
 
 class NotificationType(str, enum.Enum):
     TASK_COMPLETED = "TASK_COMPLETED"

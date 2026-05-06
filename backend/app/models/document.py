@@ -8,8 +8,10 @@ from datetime import datetime
 
 VALID_TRANSITIONS = {
     DocumentStatus.DRAFTING: [DocumentStatus.SUBMITTED],
-    DocumentStatus.SUBMITTED: [DocumentStatus.APPROVED, DocumentStatus.REJECTED],
-    DocumentStatus.APPROVED: [],
+    DocumentStatus.SUBMITTED: [DocumentStatus.REVIEWED, DocumentStatus.REJECTED],
+    DocumentStatus.REVIEWED: [DocumentStatus.APPROVED, DocumentStatus.REJECTED],
+    DocumentStatus.APPROVED: [DocumentStatus.ARCHIVED],
+    DocumentStatus.ARCHIVED: [],
     DocumentStatus.REJECTED: [DocumentStatus.DRAFTING],
 }
 
@@ -54,6 +56,14 @@ class Document(Base):
     draft_suggestion: Mapped[str | None] = mapped_column(Text, nullable=True)
     word_output_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     reviewer_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("system_users.user_id"), nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("system_users.user_id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    document_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    issued_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("system_users.user_id"), nullable=True)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    archived_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("system_users.user_id"), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    dispatch_depts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[func.now] = mapped_column(DateTime, nullable=False, server_default=func.now())
@@ -64,6 +74,9 @@ class Document(Base):
     doc_type = relationship("DocumentType")
     exemplar = relationship("ExemplarDocument")
     reviewer = relationship("SystemUser", foreign_keys=[reviewer_id])
+    reviewed_by_user = relationship("SystemUser", foreign_keys=[reviewed_by])
+    issued_by_user = relationship("SystemUser", foreign_keys=[issued_by])
+    archived_by_user = relationship("SystemUser", foreign_keys=[archived_by])
     snapshots = relationship("DocumentSnapshot", back_populates="document", cascade="all, delete-orphan")
 
     __table_args__ = (

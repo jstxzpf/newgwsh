@@ -39,16 +39,19 @@ class TaskService:
         return task_id
 
     @staticmethod
-    async def trigger_format_task(db: AsyncSession, doc_id: str, creator_id: int) -> str:
-        # 铁律 (§4)：状态校验
+    async def trigger_format_task(db: AsyncSession, doc_id: str, user_id: int, role_level: int) -> str:
         doc_result = await db.execute(select(Document).where(Document.doc_id == doc_id))
         doc = doc_result.scalars().first()
         if not doc or doc.status not in ["DRAFTING", "APPROVED"]:
             raise BusinessException(400, "仅允许对起草中或已通过的公文触发排版")
 
+        # 属主校验：仅文档起草人或管理员可触发排版
+        if doc.creator_id != user_id and role_level < 99:
+            raise BusinessException(403, "仅公文起草人或管理员可触发排版")
+
         task_id = str(uuid.uuid4())
         new_task = AsyncTask(
-            task_id=task_id, task_type="FORMAT", doc_id=doc_id, creator_id=creator_id,
+            task_id=task_id, task_type="FORMAT", doc_id=doc_id, creator_id=user_id,
             input_params={"doc_id": doc_id}
         )
         db.add(new_task)

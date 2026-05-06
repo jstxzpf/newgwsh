@@ -18,7 +18,7 @@ export const Dashboard: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
   const navigate = useNavigate();
-  const [statsData, setStatsData] = useState({ drafted: 0, submitted: 0, rejected: 0, approved: 0 });
+  const [statsData, setStatsData] = useState({ drafted: 0, submitted: 0, reviewed: 0, rejected: 0, approved: 0, archived: 0 });
   const [recentDocs, setRecentDocs] = useState<any[]>([]);
 
   useEffect(() => {
@@ -50,9 +50,11 @@ export const Dashboard: React.FC = () => {
 
   const stats = [
     { title: '我起草的', value: statsData.drafted, icon: <FileTextOutlined />, color: '#1890ff' },
-    { title: '待签批', value: statsData.submitted, icon: <ClockCircleOutlined />, color: '#faad14' },
+    { title: '待科长审核', value: statsData.submitted, icon: <ClockCircleOutlined />, color: '#faad14' },
+    { title: '待局长签发', value: statsData.reviewed, icon: <ClockCircleOutlined />, color: '#13c2c2' },
     { title: '被驳回', value: statsData.rejected, icon: <ExclamationCircleOutlined />, color: '#ff4d4f' },
-    { title: '已归档', value: statsData.approved, icon: <CheckCircleOutlined />, color: '#52c41a' },
+    { title: '已签发', value: statsData.approved, icon: <CheckCircleOutlined />, color: '#52c41a' },
+    { title: '已归档', value: statsData.archived, icon: <CheckCircleOutlined />, color: '#8c8c8c' },
   ];
 
   return (
@@ -96,7 +98,7 @@ export const Dashboard: React.FC = () => {
 
       <Row gutter={16}>
         {stats.map((item, index) => (
-          <Col span={6} key={index}>
+          <Col span={4} key={index}>
             <Card hoverable>
               <Statistic 
                 title={item.title} 
@@ -120,7 +122,7 @@ export const Dashboard: React.FC = () => {
                     title={item.title}
                     description={
                       <Space>
-                        <Badge status={item.status === 'DRAFTING' ? 'processing' : (item.status === 'SUBMITTED' ? 'warning' : 'default')} text={item.status === 'DRAFTING' ? '起草中' : (item.status === 'SUBMITTED' ? '审核中' : item.status)} />
+                        <Badge status={item.status === 'DRAFTING' ? 'processing' : (item.status === 'SUBMITTED' || item.status === 'REVIEWED' ? 'warning' : 'default')} text={{DRAFTING:'起草中',SUBMITTED:'待科长审核',REVIEWED:'科长已审',APPROVED:'已签发',REJECTED:'已驳回',ARCHIVED:'已归档'}[item.status] || item.status} />
                         <Typography.Text type="secondary">{new Date(item.created_at).toLocaleString()}</Typography.Text>
                       </Space>
                     }

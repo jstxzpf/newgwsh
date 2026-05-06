@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete
+from sqlalchemy import delete, select, update
 from app.models.user import UserSession
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -12,7 +12,6 @@ class AuthService:
     @staticmethod
     async def create_session(db: AsyncSession, user_id: int, refresh_token_hash: str) -> str:
         session_id = str(uuid.uuid4())
-        # 使用 naive UTC datetime 适配 TIMESTAMP WITHOUT TIME ZONE
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         new_session = UserSession(
             session_id=session_id,
@@ -22,3 +21,11 @@ class AuthService:
         )
         db.add(new_session)
         return session_id
+
+    @staticmethod
+    async def update_session_hash(db: AsyncSession, session_id: str, refresh_token_hash: str):
+        await db.execute(
+            update(UserSession)
+            .where(UserSession.session_id == session_id)
+            .values(refresh_token_hash=refresh_token_hash)
+        )

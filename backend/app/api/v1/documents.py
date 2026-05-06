@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
 from app.core.database import get_db
 from app.models.user import SystemUser
 from app.models.document import Document, DocumentSnapshot, DocumentType
+from app.models.system import NBSWorkflowAudit
+from app.models.enums import WorkflowNodeId
 from app.schemas.document import DocumentInitRequest, AutoSaveRequest, ApplyPolishRequest, SnapshotCreateRequest
 from app.core.exceptions import BusinessException
 from app.api.dependencies import get_current_user
@@ -98,8 +100,10 @@ async def get_dashboard_stats(current_user: SystemUser = Depends(get_current_use
         "data": {
             "drafted": drafted_count,
             "submitted": counts.get("SUBMITTED", 0),
+            "reviewed": counts.get("REVIEWED", 0),
             "rejected": counts.get("REJECTED", 0),
-            "approved": counts.get("APPROVED", 0)
+            "approved": counts.get("APPROVED", 0),
+            "archived": counts.get("ARCHIVED", 0)
         }
     }
 
@@ -250,6 +254,14 @@ async def restore_snapshot(doc_id: str, snapshot_id: int, current_user: SystemUs
     if not snap:
         raise BusinessException(404, "快照不存在")
     doc.content = snap.content
+
+    audit = NBSWorkflowAudit(
+        doc_id=doc_id,
+        workflow_node_id=WorkflowNodeId.SNAPSHOT_RESTORE,
+        operator_id=current_user.user_id,
+        action_details={"snapshot_id": snapshot_id, "trigger_event": snap.trigger_event}
+    )
+    db.add(audit)
     await db.commit()
     return {"code": 200, "message": "success", "data": None}
 
@@ -257,3 +269,48 @@ async def restore_snapshot(doc_id: str, snapshot_id: int, current_user: SystemUs
 async def verify_document_sip(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     res = await DocumentService.verify_sip(db, doc_id)
     return {"code": 200, "message": "success", "data": res}
+
+
+@router.post("/{doc_id}/archive")
+async def archive_document(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """归档：APPROVED → ARCHIVED"""
+    result = await db.execute(select(Document).where(Document.doc_id == doc_id))
+    doc = result.scalars().first()
+    if not doc:
+        raise BusinessException(404, "公文不存在")
+
+    await DocumentService.archive_document(db, doc, current_user.user_id)
+    await db.commit()
+    return {"code": 200, "message": "success", "data": {"new_status": "ARCHIVED"}}
+
+
+@router.post("/{doc_id}/dispatch")
+async def dispatch_document(
+    doc_id: str,
+    dept_ids: list[int] = Body(..., embed=True),
+    current_user: SystemUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """分发：记录分发科室 (APPROVED/ARCHIVED)"""
+    result = await db.execute(select(Document).where(Document.doc_id == doc_id))
+    doc = result.scalars().first()
+    if not doc:
+        raise BusinessException(404, "公文不存在")
+
+    await DocumentService.dispatch_document(db, doc, current_user.user_id, dept_ids)
+    await db.commit()
+    return {"code": 200, "message": "success", "data": {"dispatch_depts": doc.dispatch_depts}}
+
+
+@router.get("/{doc_id}/number")
+async def preview_document_number(doc_id: str, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """预览发文编号（签发前预览，不实际分配）"""
+    result = await db.execute(select(Document).where(Document.doc_id == doc_id))
+    doc = result.scalars().first()
+    if not doc:
+        raise BusinessException(404, "公文不存在")
+    if doc.document_number:
+        return {"code": 200, "message": "success", "data": {"document_number": doc.document_number, "assigned": True}}
+
+    preview = await DocumentService._generate_document_number(db)
+    return {"code": 200, "message": "success", "data": {"document_number": preview, "assigned": False}}

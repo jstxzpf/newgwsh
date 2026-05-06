@@ -23,12 +23,15 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
         
     # 清除旧会话（解耦至 Service，对齐单一设备登录铁律 §五.7）
     await AuthService.clear_user_sessions(db, user.user_id)
-    
-    access_token = create_access_token(subject=user.user_id)
+
+    # 创建会话记录（先创建以获取 session_id）
+    session_id = await AuthService.create_session(db, user.user_id, get_password_hash("pending"))
+
+    access_token = create_access_token(subject=user.user_id, session_id=session_id)
     refresh_token = create_refresh_token(subject=user.user_id)
-    
-    # 写入新会话
-    await AuthService.create_session(db, user.user_id, get_password_hash(refresh_token))
+
+    # 回写 refresh_token_hash
+    await AuthService.update_session_hash(db, session_id, get_password_hash(refresh_token))
     await db.commit()
     
     # Refresh Token 存放于 HttpOnly Cookie
@@ -45,36 +48,53 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
 async def get_me(current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     from app.models.user import Department
     result = await db.execute(
-        select(SystemUser, Department.dept_name)
+        select(SystemUser, Department.dept_name, Department.dept_head_id)
         .outerjoin(Department, SystemUser.dept_id == Department.dept_id)
         .where(SystemUser.user_id == current_user.user_id)
     )
     row = result.first()
-    
+
+    is_dept_head = bool(row and row[2] is not None and row[2] == current_user.user_id)
+
     data = UserInfoResponse(
         user_id=current_user.user_id,
         username=current_user.username,
         full_name=current_user.full_name,
         role_level=current_user.role_level,
         dept_id=current_user.dept_id,
-        department_name=row[1] if row else None
+        department_name=row[1] if row else None,
+        is_dept_head=is_dept_head
     )
     return {"code": 200, "message": "success", "data": data.model_dump()}
 
 @router.post("/refresh")
 async def refresh_token(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
-    refresh_token = request.cookies.get("refresh_token")
-    if not refresh_token:
+    refresh_token_cookie = request.cookies.get("refresh_token")
+    if not refresh_token_cookie:
         raise BusinessException(401, "会话已过期，请重新登录")
-    
+
     try:
-        payload = decode_token(refresh_token)
+        payload = decode_token(refresh_token_cookie)
         user_id = int(payload.get("sub"))
     except:
         raise BusinessException(401, "无效的凭证")
-    
-    # 换发新 Token
-    access_token = create_access_token(subject=user_id)
+
+    # 查找有效会话
+    from app.models.user import UserSession
+    from datetime import datetime, timezone as tz
+    now = datetime.now(tz.utc).replace(tzinfo=None)
+    result = await db.execute(
+        select(UserSession).where(
+            UserSession.user_id == user_id,
+            UserSession.expires_at > now
+        )
+    )
+    session = result.scalars().first()
+    if not session:
+        raise BusinessException(401, "会话已失效，请重新登录")
+
+    # 换发新 Access Token（携带相同 session_id）
+    access_token = create_access_token(subject=user_id, session_id=session.session_id)
     return {"code": 200, "message": "success", "data": {"access_token": access_token}}
 
 @router.post("/logout")

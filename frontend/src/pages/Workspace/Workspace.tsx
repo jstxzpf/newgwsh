@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Layout, Spin, message, Button, Space, Tag, Popconfirm, Modal } from 'antd';
-import { LeftOutlined, SendOutlined, BulbOutlined, DownloadOutlined, HistoryOutlined } from '@ant-design/icons';
+import { LeftOutlined, SendOutlined, BulbOutlined, DownloadOutlined, HistoryOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { useEditorStore } from '../../stores/editorStore';
 import { useTaskStore } from '../../stores/taskStore';
 import { useLockGuard } from '../../hooks/useLockGuard';
@@ -26,6 +26,8 @@ export const Workspace: React.FC = () => {
   const taskResults = useTaskStore(state => state.taskResults);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const polishTimeoutRef = useRef<number | null>(null);
+  const pendingTaskTypeRef = useRef<'polish' | 'format' | null>(null);
+  const [formatFailed, setFormatFailed] = useState(false);
 
   // A4 视口自适应算法 (Task 1)
   useEffect(() => {
@@ -51,7 +53,8 @@ export const Workspace: React.FC = () => {
     isReadOnly, readOnlyReason, setReadOnly,
     docTypeName, setDocMetadata, aiPolishedContent,
     draftSuggestion, setPolishedResult, setDraftSuggestion,
-    isBusy, setBusy, resetEditor, exemplarId, context_kb_ids
+    isBusy, setBusy, resetEditor, exemplarId, context_kb_ids,
+    status: docStatus
   } = useEditorStore();
 
   const { lockToken } = useLockGuard(doc_id || null);
@@ -87,6 +90,7 @@ export const Workspace: React.FC = () => {
         clearTimeout(polishTimeoutRef.current);
         polishTimeoutRef.current = null;
       }
+      pendingTaskTypeRef.current = null;
     };
   }, [doc_id]);
 
@@ -99,15 +103,25 @@ export const Workspace: React.FC = () => {
         polishTimeoutRef.current = null;
       }
       if (result.event === 'task.completed' || result.task_status === 'COMPLETED') {
-        fetchDoc().then(() => {
-          message.success('AI 润色已就绪');
-          setBusy(false);
-          setCurrentTaskId(null);
-        });
-      } else if (result.event === 'task.failed' || result.task_status === 'FAILED') {
-        message.error('AI 润色失败: ' + (result.error_message || '未知错误'));
+        if (pendingTaskTypeRef.current === 'format') {
+          message.success('国标排版已完成，可下载文档');
+          setFormatFailed(false);
+        } else {
+          fetchDoc().then(() => {
+            message.success('AI 润色已就绪');
+          });
+        }
         setBusy(false);
         setCurrentTaskId(null);
+        pendingTaskTypeRef.current = null;
+      } else if (result.event === 'task.failed' || result.task_status === 'FAILED') {
+        if (pendingTaskTypeRef.current === 'format') {
+          setFormatFailed(true);
+        }
+        message.error('任务失败: ' + (result.error_message || '未知错误'));
+        setBusy(false);
+        setCurrentTaskId(null);
+        pendingTaskTypeRef.current = null;
       }
     }
   }, [currentTaskId, taskResults]);
@@ -151,6 +165,7 @@ export const Workspace: React.FC = () => {
       const taskId = res.data.data.task_id;
       addTask(taskId);
       setCurrentTaskId(taskId);
+      pendingTaskTypeRef.current = 'polish';
       message.info('AI 润色任务已派发，请稍候...');
 
       // 5 分钟超时兜底
@@ -158,6 +173,7 @@ export const Workspace: React.FC = () => {
         message.error('AI 润色超时，请检查服务状态后重试');
         setBusy(false);
         setCurrentTaskId(null);
+        pendingTaskTypeRef.current = null;
       }, 300000);
     } catch (e) {
       setBusy(false);
@@ -199,11 +215,39 @@ export const Workspace: React.FC = () => {
         setBusy(true);
         try {
           await apiClient.post(`/documents/${doc_id}/submit`);
-          message.success('提交成功');
+          message.success('提交成功，已进入科长审核流程');
           navigate('/dashboard');
         } finally {
           setBusy(false);
         }
+      }
+    });
+  };
+
+  const handleFormat = async () => {
+    if (isBusy) return;
+    setBusy(true);
+    try {
+      const res = await apiClient.post('/tasks/format', { doc_id });
+      const taskId = res.data.data.task_id;
+      addTask(taskId);
+      setCurrentTaskId(taskId);
+      pendingTaskTypeRef.current = 'format';
+      message.info('国标排版任务已派发，完成后可下载');
+    } catch (e) {
+      setBusy(false);
+    }
+  };
+
+  const handleArchive = async () => {
+    Modal.confirm({
+      title: '确认归档？',
+      content: '归档后公文将封存，不可再进行任何操作。',
+      okText: '确认归档',
+      onOk: async () => {
+        await apiClient.post(`/documents/${doc_id}/archive`);
+        message.success('归档成功');
+        fetchDoc();
       }
     });
   };
@@ -214,7 +258,15 @@ export const Workspace: React.FC = () => {
     <Layout className="workspace-layout">
       {isReadOnly && (
         <div className={`readonly-banner ${readOnlyReason === 'CONFLICT' ? 'warning' : 'info'}`}>
-          {readOnlyReason === 'CONFLICT' ? '⚠️ 正在有他人编辑此文档，当前仅限只读' : '📘 公文已归档/流转中，不可编辑'}
+          {readOnlyReason === 'CONFLICT' ? '⚠️ 正在有他人编辑此文档，当前仅限只读' : '📘 公文已进入审批流转，当前只读'}
+        </div>
+      )}
+      {formatFailed && (
+        <div className="readonly-banner warning" style={{ background: '#fff7e6', borderBottom: '1px solid #ffd591' }}>
+          <Space>
+            <span>⚠️ 国标排版失败，请检查文档内容后重试</span>
+            <Button size="small" type="primary" danger onClick={handleFormat}>重新排版</Button>
+          </Space>
         </div>
       )}
 
@@ -240,16 +292,21 @@ export const Workspace: React.FC = () => {
           >
             AI 智能润色
           </Button>
-          <Button icon={<DownloadOutlined />} disabled={isReadOnly}>GB国标排版</Button>
-          <Button 
-            type="primary" 
-            icon={<SendOutlined />} 
-            style={{ background: '#003366' }}
-            onClick={handleSubmit}
-            disabled={isReadOnly || isBusy}
-          >
-            提交审批
-          </Button>
+          <Button icon={<DownloadOutlined />} onClick={handleFormat} loading={isBusy && currentTaskId !== null} disabled={!isReadOnly || docStatus === 'DRAFTING'}>GB国标排版</Button>
+          {docStatus === 'APPROVED' && (
+            <Button icon={<FolderOpenOutlined />} onClick={handleArchive}>归档封存</Button>
+          )}
+          {docStatus === 'DRAFTING' && (
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              style={{ background: '#003366' }}
+              onClick={handleSubmit}
+              disabled={isReadOnly || isBusy}
+            >
+              提交审批
+            </Button>
+          )}
         </Space>
       </Header>
 

@@ -12,17 +12,25 @@ export const VirtualDocTree: React.FC = () => {
     useEditorStore.setState({ context_kb_ids: ids });
   };
 
+  const toTreeNode = (item: any): any => {
+    if (typeof item === 'string') return { title: item, key: item, isLeaf: true };
+    const node: any = {
+      title: item.kb_name,
+      key: item.kb_id,
+      isLeaf: item.kb_type === 'FILE',
+    };
+    if (item.children && item.children.length > 0) {
+      node.children = item.children.map(toTreeNode);
+    }
+    return node;
+  };
+
   useEffect(() => {
     const fetchHierarchy = async () => {
       try {
         const res = await apiClient.get('/kb/hierarchy');
-        // 兼容后端返回结构
         const items = res.data.data;
-        const data = items.map((item: any, index: number) => ({
-          title: typeof item === 'string' ? item : item.kb_name,
-          key: typeof item === 'string' ? index + 1 : item.kb_id,
-          isLeaf: typeof item === 'string' ? true : item.kb_type === 'FILE'
-        }));
+        const data = items.map(toTreeNode);
         setTreeData(data);
       } catch (err) {
         console.error(err);

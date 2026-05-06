@@ -31,7 +31,7 @@ class AsyncTask(Base):
 class NBSWorkflowAudit(Base):
     __tablename__ = "nbs_workflow_audit"
     audit_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    doc_id: Mapped[str] = mapped_column(String(64), ForeignKey("documents.doc_id"), index=True, nullable=False)
+    doc_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("documents.doc_id"), index=True, nullable=True)
     workflow_node_id: Mapped[int] = mapped_column(Integer, nullable=False)
     operator_id: Mapped[int] = mapped_column(Integer, ForeignKey("system_users.user_id"), nullable=False)
     reference_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("document_approval_logs.log_id"), nullable=True)
@@ -73,6 +73,7 @@ class UserNotification(Base):
     __tablename__ = "user_notifications"
     notification_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("system_users.user_id"), index=True, nullable=False)
+    trigger_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("system_users.user_id"), nullable=True)
     doc_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("documents.doc_id"), index=True, nullable=True)
     type: Mapped[NotificationType] = mapped_column(SQLEnum(NotificationType), nullable=False)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -80,5 +81,6 @@ class UserNotification(Base):
     created_at: Mapped[func.now] = mapped_column(DateTime, index=True, nullable=False, server_default=func.now())
 
     # Relationships
-    user = relationship("SystemUser")
+    user = relationship("SystemUser", foreign_keys=[user_id])
+    trigger_user = relationship("SystemUser", foreign_keys=[trigger_user_id])
     document = relationship("Document")

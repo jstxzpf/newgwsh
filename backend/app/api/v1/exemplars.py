@@ -54,11 +54,17 @@ async def upload_exemplar(
     current_user: SystemUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # 权限校验：管理员或科室负责人 (§10)
-    if current_user.role_level < 5:
-        raise BusinessException(403, "无权上传范文")
+    # 权限校验 (§10)
     if tier == "BASE" and current_user.role_level < 99:
         raise BusinessException(403, "仅管理员可上传全局范文")
+    if tier == "DEPT":
+        from app.models.user import Department
+        dept_result = await db.execute(
+            select(Department).where(Department.dept_id == current_user.dept_id, Department.is_active == True)
+        )
+        dept = dept_result.scalars().first()
+        if not dept or dept.dept_head_id != current_user.user_id:
+            raise BusinessException(403, "仅科室负责人可上传科室范文")
 
     # MIME 校验 (§7)
     if file.content_type != "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
@@ -66,15 +72,32 @@ async def upload_exemplar(
 
     content = await file.read()
     content_hash = hashlib.sha256(content).hexdigest()
-    
+
     # 去重
     result = await db.execute(select(ExemplarDocument).where(ExemplarDocument.content_hash == content_hash, ExemplarDocument.is_deleted == False))
     if result.scalars().first():
         raise BusinessException(409, "相同内容的范文已存在")
 
-    file_path = f"/app/data/exemplars/{content_hash}.docx"
-    # 模拟保存
-    
+    # 实际保存文件
+    output_dir = "/app/data/exemplars"
+    os.makedirs(output_dir, exist_ok=True)
+    file_path = f"{output_dir}/{content_hash}.docx"
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # 真实提取 docx 文本（含降级容错）
+    extracted_text = ""
+    extraction_ok = False
+    try:
+        from io import BytesIO
+        from docx import Document as DocxReader
+        docx = DocxReader(BytesIO(content))
+        paragraphs = [p.text for p in docx.paragraphs if p.text.strip()]
+        extracted_text = "\n".join(paragraphs)
+        extraction_ok = True
+    except Exception:
+        pass  # 提取失败则置空，允许降级存入
+
     new_ex = ExemplarDocument(
         title=title,
         doc_type_id=doc_type_id,
@@ -83,11 +106,15 @@ async def upload_exemplar(
         file_path=file_path,
         content_hash=content_hash,
         uploader_id=current_user.user_id,
-        extracted_text="（模拟提取内容）" # 实际应由 worker 提取
+        extracted_text=extracted_text
     )
     db.add(new_ex)
     await db.commit()
-    return {"code": 200, "message": "success", "data": {"exemplar_id": new_ex.exemplar_id}}
+    return {"code": 200, "message": "success", "data": {
+        "exemplar_id": new_ex.exemplar_id,
+        "extraction_status": "ok" if extraction_ok else "failed",
+        "extracted_length": len(extracted_text)
+    }}
 
 @router.get("/{id}/preview")
 async def preview_exemplar(id: int, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
@@ -99,9 +126,15 @@ async def preview_exemplar(id: int, current_user: SystemUser = Depends(get_curre
 
 @router.delete("/{id}")
 async def delete_exemplar(id: int, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    # 权限校验
-    if current_user.role_level < 5:
-        raise BusinessException(403, "无权删除范文")
+    # 权限校验：管理员或科室负责人
+    if current_user.role_level < 99:
+        from app.models.user import Department
+        dept_result = await db.execute(
+            select(Department).where(Department.dept_id == current_user.dept_id, Department.is_active == True)
+        )
+        dept = dept_result.scalars().first()
+        if not dept or dept.dept_head_id != current_user.user_id:
+            raise BusinessException(403, "仅科室负责人或管理员可删除范文")
 
     result = await db.execute(select(ExemplarDocument).where(ExemplarDocument.exemplar_id == id))
     ex = result.scalars().first()

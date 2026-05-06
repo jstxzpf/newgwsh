@@ -59,12 +59,33 @@ class LockService:
 
     @staticmethod
     async def force_release(db: AsyncSession, doc_id: str, admin_id: int):
-        # 强制释放锁并记录审计 (铁律 §二.3)
-        await release_redis_lock(doc_id, user_id=0, token="", force=True) # 内部 force 逻辑
-        
+        from app.core.locks import redis_client
+        import json as _json
+
+        # 读取锁持有者信息（推送 SSE 前）
+        existing = await redis_client.get(f"lock:{doc_id}")
+        evicted_user_id = None
+        if existing:
+            try:
+                data = _json.loads(existing)
+                evicted_user_id = data.get("user_id")
+            except Exception:
+                pass
+
+        await release_redis_lock(doc_id, user_id=0, token="", force=True)
+
+        # 向被驱逐者推送 LOCK_RECLAIMED SSE 事件
+        if evicted_user_id:
+            event_data = _json.dumps({
+                "type": "notification.lock_reclaimed",
+                "doc_id": doc_id,
+                "reason": "管理员已强制释放您的编辑锁，当前切换为只读模式"
+            }, ensure_ascii=False)
+            await redis_client.publish(f"user_events:{evicted_user_id}", event_data)
+
         audit = NBSWorkflowAudit(
             doc_id=doc_id,
-            workflow_node_id=99, # 强制释放特殊代码
+            workflow_node_id=99,
             operator_id=admin_id,
             action_details={"action": "FORCE_RELEASE_LOCK"}
         )

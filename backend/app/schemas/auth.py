@@ -15,3 +15,4 @@ class UserInfoResponse(BaseModel):
     role_level: int
     dept_id: int | None
     department_name: str | None = None
+    is_dept_head: bool = False
