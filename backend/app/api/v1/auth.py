@@ -21,8 +21,8 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
     if not user.is_active:
         raise BusinessException(403, "账号已被停用")
         
-    # 清除旧会话（解耦至 Service，对齐单一设备登录铁律 §五.7）
-    await AuthService.clear_user_sessions(db, user.user_id)
+    # 清除旧会话（单设备登录铁律 §五.7：新登录踢出所有旧会话）
+    await AuthService.enforce_session_limit(db, user.user_id, max_keep=0)
 
     # 创建会话记录（先创建以获取 session_id）
     session_id = await AuthService.create_session(db, user.user_id, get_password_hash("pending"))
@@ -98,9 +98,29 @@ async def refresh_token(request: Request, response: Response, db: AsyncSession =
     return {"code": 200, "message": "success", "data": {"access_token": access_token}}
 
 @router.post("/logout")
-async def logout(response: Response, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    # 清除会话记录（契约 §1）
-    await AuthService.clear_user_sessions(db, current_user.user_id)
+async def logout(
+    request: Request,
+    response: Response, 
+    current_user: SystemUser = Depends(get_current_user), 
+    db: AsyncSession = Depends(get_db)
+):
+    from app.api.dependencies import oauth2_scheme
+    from jose import jwt
+    from app.core.config import settings
+
+    # 获取当前请求的 session_id 并仅清除该 session
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+            session_id = payload.get("sid")
+            if session_id:
+                await AuthService.clear_single_session(db, session_id)
+        except Exception:
+            pass
+
+    # 若未能清除单个，则不进行全量清除，仅依赖前端退出逻辑和过期机制
     await db.commit()
     response.delete_cookie("refresh_token")
     return {"code": 200, "message": "success", "data": None}
