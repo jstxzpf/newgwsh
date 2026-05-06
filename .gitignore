@@ -108,3 +108,12 @@ test_kb_file.txt
 .qwen/
 .trae/
 skills-lock.json
+
+# --- Agent Skills (managed externally) ---
+skills/
+.agents/skills/
+.agent/skills/
+.spec-workflow/
+
+# --- Backend Data ---
+backend/data/
