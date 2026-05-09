@@ -138,7 +138,8 @@ async def get_document(doc_id: str, current_user: SystemUser = Depends(get_curre
             "doc_type_name": row.type_name,
             "creator_name": row.full_name,
             "ai_polished_content": doc.ai_polished_content,
-            "draft_suggestion": doc.draft_suggestion
+            "draft_suggestion": doc.draft_suggestion,
+            "word_output_path": doc.word_output_path
         }
     }
 

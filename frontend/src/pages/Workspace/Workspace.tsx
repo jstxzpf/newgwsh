@@ -28,6 +28,7 @@ export const Workspace: React.FC = () => {
   const polishTimeoutRef = useRef<number | null>(null);
   const pendingTaskTypeRef = useRef<'polish' | 'format' | null>(null);
   const [formatFailed, setFormatFailed] = useState(false);
+  const [hasDownload, setHasDownload] = useState(false);
 
   // A4 视口自适应算法 (Task 1)
   useEffect(() => {
@@ -70,6 +71,10 @@ export const Workspace: React.FC = () => {
         setPolishedResult(doc.ai_polished_content, doc.draft_suggestion);
       }
 
+      if (doc.word_output_path) {
+        setHasDownload(true);
+      }
+
       if (doc.status !== 'DRAFTING') {
         setReadOnly(true, 'IMMUTABLE');
       }
@@ -104,8 +109,11 @@ export const Workspace: React.FC = () => {
       }
       if (result.event === 'task.completed' || result.task_status === 'COMPLETED') {
         if (pendingTaskTypeRef.current === 'format') {
-          message.success('国标排版已完成，可下载文档');
+          message.success('国标排版已完成，开始下载');
           setFormatFailed(false);
+          fetchDoc().then(() => {
+            window.open(`/api/v1/documents/${doc_id}/download`, '_blank');
+          });
         } else {
           fetchDoc().then(() => {
             message.success('AI 润色已就绪');
@@ -300,6 +308,11 @@ export const Workspace: React.FC = () => {
             AI 智能润色
           </Button>
           <Button icon={<DownloadOutlined />} onClick={handleFormat} loading={isBusy && currentTaskId !== null} disabled={!isReadOnly || docStatus === 'DRAFTING'}>GB国标排版</Button>
+          {hasDownload && (
+            <Button type="primary" icon={<DownloadOutlined />} onClick={() => window.open(`/api/v1/documents/${doc_id}/download`, '_blank')}>
+              下载排版文件
+            </Button>
+          )}
           {docStatus === 'APPROVED' && (
             <Button icon={<FolderOpenOutlined />} onClick={handleArchive}>归档封存</Button>
           )}
