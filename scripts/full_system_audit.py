@@ -837,7 +837,11 @@ class AuditEngine:
                     await self.page.wait_for_timeout(500)
                     textarea = self.page.locator('.ant-modal textarea')
                     await textarea.fill("巡检测试驳回：需补充统计数据来源")
-                    await self.page.click('.ant-modal-footer .ant-btn-primary')
+                    # 驳回确认按钮 okType="danger" 渲染为 ant-btn-dangerous 而非 ant-btn-primary
+                    try:
+                        await self.page.click('.ant-modal-footer .ant-btn-dangerous', timeout=3000)
+                    except Exception:
+                        await self.page.click('.ant-modal-footer .ant-btn-primary', timeout=3000)
                     msg_rej = await self._ui_assert_message("驳回", timeout=5000)
                     self._check(M, "B-APPR.7a 科长「驳回打回」→填理由→确认", msg_rej,
                         section="§一.5")
@@ -1473,18 +1477,18 @@ class AuditEngine:
     # ========================================================================
     async def module_i_ui_settings(self):
         M = "I-UI"
-        # 前置：在 UI 登录前（当前 API 会话有效时）创建测试锁
+        ui_ok = await self._ui_login(ADMIN_USER, ADMIN_PASS)
+        if not ui_ok:
+            self._check(M, "I-UI.X", False, "登录失败", status_override=Status.SKIP)
+            return
+
+        # 在 UI 登录后创建测试锁（与浏览器 token 同源，避免会话踢出导致锁不可见）
         lock_doc_res = await self._api("POST", "/documents/init", json_data={
             "title": f"锁控UI测试-{int(time.time())}", "doc_type_id": 1,
         })
         lock_doc_id = lock_doc_res.get("body", {}).get("data", {}).get("doc_id")
         if lock_doc_id:
             await self._api("POST", "/locks/acquire", json_data={"doc_id": lock_doc_id})
-
-        ui_ok = await self._ui_login(ADMIN_USER, ADMIN_PASS)
-        if not ui_ok:
-            self._check(M, "I-UI.X", False, "登录失败", status_override=Status.SKIP)
-            return
 
         # I-UI.1 检查 Settings 标题和 Tab
         await self._ui_navigate("/settings")
@@ -1523,10 +1527,17 @@ class AuditEngine:
         # I-UI.4 「核心锁控大盘」Tab → 锁表格 + 强放按钮
         try:
             await self.page.click(f'.ant-tabs-tab:has-text("核心锁控大盘")')
-            await self.page.wait_for_timeout(1500)
-            table_ok = await self._ui_visible("table", timeout=5000)
-            force_btn = await self._ui_visible("text=强放", timeout=3000)
-            self._check(M, "I-UI.4 锁控Tab: 锁表格+强放按钮", table_ok,
+            await self.page.wait_for_timeout(2000)
+            # 等待 API 返回并渲染：轮询检查直到表格或按钮出现
+            table_ok = False
+            force_btn = False
+            for _ in range(6):
+                table_ok = await self._ui_visible(".ant-table", timeout=1000)
+                force_btn = await self._ui_visible("text=强放", timeout=1000)
+                if table_ok or force_btn:
+                    break
+                await self.page.wait_for_timeout(1000)
+            self._check(M, "I-UI.4 锁控Tab: 锁表格+强放按钮", table_ok or force_btn,
                 f"table={table_ok}, force_btn={force_btn}", section="§五.4")
         except Exception as e:
             self._check(M, "I-UI.4 锁控Tab", False, str(e)[:150])

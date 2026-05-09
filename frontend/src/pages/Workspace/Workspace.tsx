@@ -144,7 +144,7 @@ export const Workspace: React.FC = () => {
       }
     };
 
-    const timer = setInterval(autoSave, 60000);
+    const timer = setInterval(autoSave, 15000);
     return () => clearInterval(timer);
   }, [doc_id, content, draftSuggestion, viewMode, isReadOnly, isBusy]);
 
@@ -152,6 +152,12 @@ export const Workspace: React.FC = () => {
     if (isBusy) return;
     setBusy(true);
     try {
+      // 先将当前内容保存到数据库，确保 Worker 读到最新版本
+      await apiClient.post(`/documents/${doc_id}/auto-save`, {
+        content: viewMode === 'SINGLE' ? content : undefined,
+        draft_content: viewMode !== 'SINGLE' ? draftSuggestion : undefined,
+      });
+
       const snapRes = await apiClient.get('/kb/snapshot-version');
       const snapshotVersion = snapRes.data.data.snapshot_version;
 
@@ -174,7 +180,7 @@ export const Workspace: React.FC = () => {
         setBusy(false);
         setCurrentTaskId(null);
         pendingTaskTypeRef.current = null;
-      }, 300000);
+      }, 600000);
     } catch (e: any) {
       message.error('AI 润色请求失败: ' + (e.response?.data?.message || '请检查服务状态后重试'));
       setBusy(false);

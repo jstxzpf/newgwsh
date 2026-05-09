@@ -1,0 +1,19 @@
+- generic [ref=e6]:
+  - generic [ref=e7]:
+    - img "Logo" [ref=e8]
+    - heading "国家统计局泰兴调查队" [level=3] [ref=e9]
+    - text: 公文处理系统 V3.0
+  - generic [ref=e10]:
+    - generic [ref=e16]:
+      - img "user" [ref=e18]:
+        - img [ref=e19]
+      - textbox "工号" [ref=e21]
+    - generic [ref=e27]:
+      - img "lock" [ref=e29]:
+        - img [ref=e30]
+      - textbox "密码" [ref=e32]
+      - img "eye-invisible" [ref=e34] [cursor=pointer]:
+        - img [ref=e35]
+    - button "进入系统" [ref=e43] [cursor=pointer]:
+      - generic [ref=e44]: 进入系统
+  - generic [ref=e45]: © 2026 国家统计局泰兴调查队 版权所有

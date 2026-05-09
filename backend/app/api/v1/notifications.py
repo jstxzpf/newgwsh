@@ -34,7 +34,8 @@ async def get_notifications(
             "doc_id": item.doc_id,
             "type": item.type,
             "content": item.content,
-            "is_read": item.is_read
+            "is_read": item.is_read,
+            "created_at": item.created_at.isoformat() if item.created_at else None
         } for item in items]
     }}
 

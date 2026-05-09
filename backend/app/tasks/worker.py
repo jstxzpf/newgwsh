@@ -19,7 +19,8 @@ _POLISH_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "..", "prompts", "
 @celery_app.task(bind=True, max_retries=3)
 def process_polish_task(self, task_id: str, doc_id: str):
     with SyncSessionLocal() as session:
-        _mark_task_processing(session, task_id)
+        with session.begin():
+            _mark_task_processing(session, task_id)
         try:
             # 1. 加载公文与任务参数（单独事务，不长时间持锁）
             with session.begin():
@@ -79,6 +80,11 @@ def process_polish_task(self, task_id: str, doc_id: str):
                 context_str = "\n\n".join(context_parts) if context_parts else "无额外参考上下文"
 
             # 2. 构建 Prompt（事务外）
+            if not doc_content.strip():
+                with session.begin():
+                    _mark_task_failed(session, task_id, "公文正文为空，无法润色。请先起草正文内容。")
+                return
+
             if os.path.exists(_POLISH_PROMPT_PATH):
                 with open(_POLISH_PROMPT_PATH, "r", encoding="utf-8") as f:
                     template = f.read()
@@ -92,11 +98,13 @@ def process_polish_task(self, task_id: str, doc_id: str):
             try:
                 polished = generate_sync(prompt)
             except Exception as llm_err:
-                _mark_task_failed(session, task_id, f"AI 引擎调用失败: {str(llm_err)}")
+                with session.begin():
+                    _mark_task_failed(session, task_id, f"AI 引擎调用失败: {str(llm_err)}")
                 return
 
             if not polished or not polished.strip():
-                _mark_task_failed(session, task_id, "AI 引擎返回空结果")
+                with session.begin():
+                    _mark_task_failed(session, task_id, "AI 引擎返回空结果")
                 return
 
             _publish_progress(task_id, 90, "正在保存结果...")
@@ -128,7 +136,8 @@ def process_polish_task(self, task_id: str, doc_id: str):
         except Exception as e:
             session.rollback()
             if self.request.retries >= self.max_retries:
-                _mark_task_failed(session, task_id, f"任务异常: {str(e)}")
+                with session.begin():
+                    _mark_task_failed(session, task_id, f"任务异常: {str(e)}")
                 return
             raise self.retry(exc=e)
 
@@ -136,7 +145,8 @@ def process_polish_task(self, task_id: str, doc_id: str):
 def process_format_task(self, doc_id: str, task_id: str = None):
     with SyncSessionLocal() as session:
         if task_id:
-            _mark_task_processing(session, task_id)
+            with session.begin():
+                _mark_task_processing(session, task_id)
         try:
             os.makedirs(settings.OUTPUT_DIR, exist_ok=True)
             output_path = os.path.join(settings.OUTPUT_DIR, f"{doc_id}.docx")
@@ -212,7 +222,8 @@ def process_format_task(self, doc_id: str, task_id: str = None):
                     body_font = layout_rules.get("body_font", "仿宋_GB2312")
                     line_spacing = layout_rules.get("line_spacing_pt", 28)
 
-                    for para_text in (doc.content or "").split("\n"):
+                    body_text = doc.ai_polished_content or doc.content or ""
+                    for para_text in body_text.split("\n"):
                         body_para = docx.add_paragraph()
                         body_para.paragraph_format.line_spacing = Pt(line_spacing)
                         # First-line indent: 2 chars at current font size
@@ -255,7 +266,8 @@ def process_format_task(self, doc_id: str, task_id: str = None):
             session.rollback()
             if self.request.retries >= self.max_retries:
                 if task_id:
-                    _mark_task_failed(session, task_id, f"排版任务异常: {str(e)}")
+                    with session.begin():
+                        _mark_task_failed(session, task_id, f"排版任务异常: {str(e)}")
                 return
             raise self.retry(exc=e)
 
@@ -263,7 +275,8 @@ def process_format_task(self, doc_id: str, task_id: str = None):
 def process_parse_task(self, kb_id: int, task_id: str = None):
     with SyncSessionLocal() as session:
         if task_id:
-            _mark_task_processing(session, task_id)
+            with session.begin():
+                _mark_task_processing(session, task_id)
             _publish_progress(task_id, 10, "开始解析...")
         try:
             with session.begin():
@@ -280,7 +293,6 @@ def process_parse_task(self, kb_id: int, task_id: str = None):
 
                 # Mark as parsing
                 kb_node.parse_status = "PARSING"
-                session.commit()
 
             if task_id:
                 _publish_progress(task_id, 30, "读取文件内容...")
@@ -313,11 +325,11 @@ def process_parse_task(self, kb_id: int, task_id: str = None):
 
                 kb_node = session.get(KnowledgeBaseHierarchy, kb_id)
                 kb_node.parse_status = "READY"
-                session.commit()
 
             if task_id:
                 _publish_progress(task_id, 100, "解析完成")
-                _mark_task_completed(session, task_id, "parsed")
+                with session.begin():
+                    _mark_task_completed(session, task_id, "parsed")
         except Exception as e:
             session.rollback()
             # Mark node as FAILED so user can trigger re-parse
@@ -326,7 +338,8 @@ def process_parse_task(self, kb_id: int, task_id: str = None):
                 if kb_node:
                     kb_node.parse_status = "FAILED"
             if task_id:
-                _mark_task_failed(session, task_id, str(e))
+                with session.begin():
+                    _mark_task_failed(session, task_id, str(e))
             if self.request.retries >= self.max_retries:
                 return
             raise self.retry(exc=e)
@@ -336,7 +349,6 @@ def _mark_task_processing(session, task_id):
     if task:
         task.task_status = TaskStatus.PROCESSING
         task.started_at = datetime.now()
-        session.commit()
 
 def _mark_task_completed(session, task_id, summary):
     task = session.get(AsyncTask, task_id)
@@ -345,8 +357,7 @@ def _mark_task_completed(session, task_id, summary):
         task.progress_pct = 100
         task.result_summary = summary
         task.completed_at = datetime.now()
-        session.commit()
-        sync_redis.publish(f"task_events:{task_id}", json.dumps({"event": "task.completed", "task_id": task_id, "result_summary": summary}))
+    sync_redis.publish(f"task_events:{task_id}", json.dumps({"event": "task.completed", "task_id": task_id, "result_summary": summary}))
 
 def _mark_task_failed(session, task_id, error):
     task = session.get(AsyncTask, task_id)
@@ -354,8 +365,7 @@ def _mark_task_failed(session, task_id, error):
         task.task_status = TaskStatus.FAILED
         task.error_message = error
         task.completed_at = datetime.now()
-        session.commit()
-        sync_redis.publish(f"task_events:{task_id}", json.dumps({"event": "task.failed", "task_id": task_id, "error_message": error}))
+    sync_redis.publish(f"task_events:{task_id}", json.dumps({"event": "task.failed", "task_id": task_id, "error_message": error}))
 
 def _publish_progress(task_id, pct, message):
     sync_redis.publish(f"task_events:{task_id}", json.dumps({

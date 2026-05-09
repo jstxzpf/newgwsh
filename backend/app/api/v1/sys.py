@@ -276,9 +276,11 @@ async def delete_department(dept_id: int, admin_user: SystemUser = Depends(get_a
 # ════════════════════════════════════════════════════════════
 
 @router.get("/doc-types")
-async def list_doc_types(admin_user: SystemUser = Depends(get_admin_user), db: AsyncSession = Depends(get_db)):
+async def list_doc_types(current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     from app.models.document import DocumentType
-    result = await db.execute(select(DocumentType).order_by(DocumentType.type_id))
+    result = await db.execute(
+        select(DocumentType).where(DocumentType.is_active == True).order_by(DocumentType.type_id)
+    )
     types = result.scalars().all()
     return {"code": 200, "data": [
         {

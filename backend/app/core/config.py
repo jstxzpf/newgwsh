@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     
     REDIS_URL: str
     OLLAMA_BASE_URL: str
+    OLLAMA_MODEL: str = "qwen3.5:9b"
+    OLLAMA_NUM_PREDICT: int = 4096
+    OLLAMA_TIMEOUT: int = 600
     SECRET_KEY: str
     SIP_SECRET_KEY: str
     

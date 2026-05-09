@@ -20,16 +20,19 @@ export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [statsData, setStatsData] = useState({ drafted: 0, submitted: 0, reviewed: 0, rejected: 0, approved: 0, archived: 0 });
   const [recentDocs, setRecentDocs] = useState<any[]>([]);
+  const [docTypes, setDocTypes] = useState<{ type_id: number; type_code: string; type_name: string }[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, docsRes] = await Promise.all([
+        const [statsRes, docsRes, docTypesRes] = await Promise.all([
           apiClient.get('/documents/dashboard/stats'),
-          apiClient.get('/documents?page=1&page_size=5')
+          apiClient.get('/documents?page=1&page_size=5'),
+          apiClient.get('/sys/doc-types')
         ]);
         setStatsData(statsRes.data.data);
         setRecentDocs(docsRes.data.data.items);
+        setDocTypes(docTypesRes.data.data || []);
       } catch (e) {
         console.error("Failed to fetch dashboard data", e);
       }
@@ -49,12 +52,12 @@ export const Dashboard: React.FC = () => {
   };
 
   const stats = [
-    { title: '我起草的', value: statsData.drafted, icon: <FileTextOutlined />, color: '#1890ff' },
-    { title: '待科长审核', value: statsData.submitted, icon: <ClockCircleOutlined />, color: '#faad14' },
-    { title: '待局长签发', value: statsData.reviewed, icon: <ClockCircleOutlined />, color: '#13c2c2' },
-    { title: '被驳回', value: statsData.rejected, icon: <ExclamationCircleOutlined />, color: '#ff4d4f' },
-    { title: '已签发', value: statsData.approved, icon: <CheckCircleOutlined />, color: '#52c41a' },
-    { title: '已归档', value: statsData.archived, icon: <CheckCircleOutlined />, color: '#8c8c8c' },
+    { title: '我起草的', value: statsData.drafted, icon: <FileTextOutlined />, color: '#1890ff', status: 'DRAFTING' },
+    { title: '待科长审核', value: statsData.submitted, icon: <ClockCircleOutlined />, color: '#faad14', status: 'SUBMITTED' },
+    { title: '待局长签发', value: statsData.reviewed, icon: <ClockCircleOutlined />, color: '#13c2c2', status: 'REVIEWED' },
+    { title: '被驳回', value: statsData.rejected, icon: <ExclamationCircleOutlined />, color: '#ff4d4f', status: 'REJECTED' },
+    { title: '已签发', value: statsData.approved, icon: <CheckCircleOutlined />, color: '#52c41a', status: 'APPROVED' },
+    { title: '已归档', value: statsData.archived, icon: <CheckCircleOutlined />, color: '#8c8c8c', status: 'ARCHIVED' },
   ];
 
   return (
@@ -88,9 +91,9 @@ export const Dashboard: React.FC = () => {
           </Form.Item>
           <Form.Item name="doc_type_id" label="文种类型" rules={[{ required: true, message: '请选择文种' }]}>
             <Select placeholder="请选择文种">
-              <Select.Option value={1}>通知</Select.Option>
-              <Select.Option value={2}>报告</Select.Option>
-              <Select.Option value={3}>请示</Select.Option>
+              {docTypes.map(dt => (
+                <Select.Option key={dt.type_id} value={dt.type_id}>{dt.type_name}</Select.Option>
+              ))}
             </Select>
           </Form.Item>
         </Form>
@@ -99,11 +102,14 @@ export const Dashboard: React.FC = () => {
       <Row gutter={16}>
         {stats.map((item, index) => (
           <Col span={4} key={index}>
-            <Card hoverable>
-              <Statistic 
-                title={item.title} 
-                value={item.value} 
-                prefix={React.cloneElement(item.icon as React.ReactElement, { style: { color: item.color } })} 
+            <Card
+              hoverable
+              onClick={() => navigate(`/documents?status=${(item as any).status}`)}
+            >
+              <Statistic
+                title={item.title}
+                value={item.value}
+                prefix={React.cloneElement(item.icon as React.ReactElement, { style: { color: item.color } })}
               />
             </Card>
           </Col>

@@ -1,27 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Table, Tag, Button, Space, Modal, message, Card, Typography, Input, Select, Badge } from 'antd';
-import { 
-  FileTextOutlined, 
-  UploadOutlined, 
-  DeleteOutlined, 
-  HistoryOutlined, 
+import {
+  FileTextOutlined,
+  UploadOutlined,
+  DeleteOutlined,
+  HistoryOutlined,
   SearchOutlined,
   EditOutlined
 } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
 
 const { Title } = Typography;
 
+const STATUS_LABEL: Record<string, string> = {
+  DRAFTING: '起草中',
+  SUBMITTED: '待科长审核',
+  REVIEWED: '科长已审',
+  APPROVED: '已签发',
+  REJECTED: '已驳回',
+  ARCHIVED: '已归档',
+};
+
 export const Documents: React.FC = () => {
+  const location = useLocation();
+  const urlStatus = useMemo(() => {
+    const p = new URLSearchParams(location.search);
+    return p.get('status') || undefined;
+  }, [location.search]);
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(urlStatus);
   const navigate = useNavigate();
   const userInfo = useAuthStore(state => state.userInfo);
+
+  useEffect(() => {
+    setStatusFilter(urlStatus);
+    setPage(1);
+  }, [urlStatus]);
 
   const fetchDocs = async () => {
     setLoading(true);
@@ -129,20 +148,20 @@ export const Documents: React.FC = () => {
   return (
     <div style={{ padding: '24px' }}>
       <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={3} style={{ margin: 0 }}>公文管理中心</Title>
+        <Title level={3} style={{ margin: 0 }}>
+          公文管理中心{statusFilter ? ` — ${STATUS_LABEL[statusFilter] || statusFilter}` : ''}
+        </Title>
         <Space>
-          <Select 
-            placeholder="按状态筛选" 
-            style={{ width: 120 }} 
+          <Select
+            placeholder="按状态筛选"
+            style={{ width: 130 }}
             allowClear
+            value={statusFilter}
             onChange={setStatusFilter}
           >
-            <Select.Option value="DRAFTING">起草中</Select.Option>
-            <Select.Option value="SUBMITTED">待科长审核</Select.Option>
-            <Select.Option value="REVIEWED">科长已审</Select.Option>
-            <Select.Option value="APPROVED">已签发</Select.Option>
-            <Select.Option value="REJECTED">已驳回</Select.Option>
-            <Select.Option value="ARCHIVED">已归档</Select.Option>
+            {Object.entries(STATUS_LABEL).map(([value, label]) => (
+              <Select.Option key={value} value={value}>{label}</Select.Option>
+            ))}
           </Select>
           <Input placeholder="搜索公文..." prefix={<SearchOutlined />} style={{ width: 250 }} />
         </Space>
