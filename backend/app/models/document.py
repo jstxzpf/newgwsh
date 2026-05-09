@@ -64,6 +64,8 @@ class Document(Base):
     archived_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("system_users.user_id"), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     dispatch_depts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    recipient: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    cc_list: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[func.now] = mapped_column(DateTime, nullable=False, server_default=func.now())

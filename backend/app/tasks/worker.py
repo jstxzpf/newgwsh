@@ -185,56 +185,11 @@ def process_format_task(self, doc_id: str, task_id: str = None):
                 except Exception:
                     pass
 
-                # Generate .docx with layout rules applied
+                # Generate .docx with template-based layout engine
                 try:
-                    from docx import Document as DocxDocument
-                    from docx.shared import Pt, Cm, Emu
-                    from docx.enum.text import WD_ALIGN_PARAGRAPH
-
-                    docx = DocxDocument()
-
-                    # Apply page margins from layout rules
-                    margins = layout_rules.get("page_margins", {})
-                    section = docx.sections[0]
-                    section.top_margin = Cm(margins.get("top", 3.7))
-                    section.bottom_margin = Cm(margins.get("bottom", 3.5))
-                    section.left_margin = Cm(margins.get("left", 2.8))
-                    section.right_margin = Cm(margins.get("right", 2.6))
-
-                    # Title (red header — 红头)
-                    title_para = docx.add_paragraph()
-                    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    title_run = title_para.add_run(doc.title or "未命名公文")
-                    title_font_size = layout_rules.get("title_font_size", 22)
-                    title_run.font.size = Pt(title_font_size)
-                    title_run.font.name = layout_rules.get("title_font", "方正小标宋简体")
-                    title_run.bold = True
-
-                    # Document number line
-                    if doc.document_number:
-                        num_para = docx.add_paragraph()
-                        num_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        num_run = num_para.add_run(f"发文编号：{doc.document_number}")
-                        num_run.font.size = Pt(layout_rules.get("body_font_size", 16))
-
-                    # Body content
-                    body_font_size = layout_rules.get("body_font_size", 16)
-                    body_font = layout_rules.get("body_font", "仿宋_GB2312")
-                    line_spacing = layout_rules.get("line_spacing_pt", 28)
-
-                    body_text = doc.ai_polished_content or doc.content or ""
-                    for para_text in body_text.split("\n"):
-                        body_para = docx.add_paragraph()
-                        body_para.paragraph_format.line_spacing = Pt(line_spacing)
-                        # First-line indent: 2 chars at current font size
-                        body_para.paragraph_format.first_line_indent = Pt(body_font_size * 2)
-                        body_run = body_para.add_run(para_text)
-                        body_run.font.size = Pt(body_font_size)
-                        body_run.font.name = body_font
-
-                    docx.save(output_path)
+                    from app.tasks.doc_formatter import render
+                    render(doc, layout_rules, output_path)
                 except ImportError:
-                    # python-docx not available, write placeholder
                     with open(output_path, "w", encoding="utf-8") as f:
                         f.write(f"{doc.title}\n\n{doc.content or ''}")
 

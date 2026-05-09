@@ -96,6 +96,15 @@ export const Dashboard: React.FC = () => {
               ))}
             </Select>
           </Form.Item>
+          <Form.Item name="document_number" label="发文字号">
+            <Input placeholder="如：泰调字〔2026〕1号" />
+          </Form.Item>
+          <Form.Item name="recipient" label="主送机关">
+            <Input placeholder="如：各市、县调查队" />
+          </Form.Item>
+          <Form.Item name="cc_list" label="抄送机关">
+            <Input.TextArea rows={2} placeholder="如：省统计局办公室&#10;省农业农村厅" />
+          </Form.Item>
         </Form>
       </Modal>
 

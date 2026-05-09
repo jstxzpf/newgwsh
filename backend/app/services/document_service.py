@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 
 class DocumentService:
     @staticmethod
-    async def init_document(db: AsyncSession, title: str, doc_type_id: int, creator_id: int, dept_id: int | None) -> str:
+    async def init_document(db: AsyncSession, title: str, doc_type_id: int, creator_id: int, dept_id: int | None,
+                            recipient: str | None = None, cc_list: str | None = None, document_number: str | None = None) -> str:
         doc_id = str(uuid.uuid4())
         new_doc = Document(
             doc_id=doc_id,
@@ -21,6 +22,9 @@ class DocumentService:
             doc_type_id=doc_type_id,
             dept_id=dept_id,
             creator_id=creator_id,
+            recipient=recipient,
+            cc_list=cc_list,
+            document_number=document_number,
             status=DocumentStatus.DRAFTING
         )
         db.add(new_doc)
@@ -32,7 +36,8 @@ class DocumentService:
         return doc_id
 
     @staticmethod
-    async def auto_save_draft(db: AsyncSession, doc: Document, title: str | None, content: str | None, draft_content: str | None):
+    async def auto_save_draft(db: AsyncSession, doc: Document, title: str | None, content: str | None, draft_content: str | None,
+                              recipient: str | None = None, cc_list: str | None = None, document_number: str | None = None):
         if doc.ai_polished_content:
             if content is not None:
                 raise BusinessException(400, "DIFF 模式下禁止覆盖主正文")
@@ -45,6 +50,12 @@ class DocumentService:
                 doc.content = content
         if title is not None:
             doc.title = title
+        if recipient is not None:
+            doc.recipient = recipient
+        if cc_list is not None:
+            doc.cc_list = cc_list
+        if document_number is not None:
+            doc.document_number = document_number
 
     @staticmethod
     async def submit_document(db: AsyncSession, doc: Document, user_id: int):

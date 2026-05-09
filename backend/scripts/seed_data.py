@@ -57,13 +57,65 @@ def seed():
                 db.flush()
             user_map[u["un"]] = user.user_id
 
-        # 3. 初始化典型文种
+        # 3. 初始化典型文种（含国标模板）
+        common_margins = {"top": 3.7, "bottom": 3.5, "left": 2.8, "right": 2.6}
+        dept_name = "国家统计局泰兴调查队"
+        red_header = {"type": "red_header", "text": "【发文机关名称】文件", "font": "方正小标宋简体", "size": 36, "color": "#CC0000", "bold": True, "space_after": 8}
+        doc_number = {"type": "paragraph", "text": "【发文字号】", "font": "仿宋_GB2312", "size": 16, "align": "center", "space_after": 12}
+        red_line = {"type": "separator", "style": "red_line"}
+        title_section = {"type": "paragraph", "text": "【标题】", "font": "方正小标宋简体", "size": 22, "align": "center", "bold": True, "space_before": 16, "space_after": 12}
+        recipient_line = {"type": "paragraph", "text": "【主送机关】：", "font": "仿宋_GB2312", "size": 16, "space_after": 8, "condition": "has_recipient"}
+        body_section = {"type": "body", "text": "【正文】", "font": "仿宋_GB2312", "size": 16, "first_line_indent": 32, "line_spacing": 28, "space_after": 8}
+        signature = {"type": "paragraph", "text": "【发文机关署名】", "font": "仿宋_GB2312", "size": 16, "align": "right", "space_before": 12, "space_after": 2}
+        date_line = {"type": "paragraph", "text": "【成文日期】", "font": "仿宋_GB2312", "size": 16, "align": "right", "space_after": 8}
+        cc_line = {"type": "paragraph", "text": "（抄送：【抄送机关】）", "font": "仿宋_GB2312", "size": 14, "space_after": 4, "condition": "has_cc"}
+
         doc_types = [
-            {"name": "通知", "code": "NOTICE", "rules": {"required_sections":["通知缘由","通知事项","执行要求","落款"]}},
-            {"name": "请示", "code": "REQUEST", "rules": {"required_sections":["请示缘由","请示事项","结尾语"],"ending_template":"妥否，请批示。"}},
-            {"name": "调研分析", "code": "RESEARCH", "rules": {"required_sections":["调研背景","主要发现","政策建议"]}},
-            {"name": "经济信息", "code": "ECONOMIC_INFO", "rules": {"required_sections":["信息摘要","核心数据指标","趋势研判"]}},
-            {"name": "通用文档", "code": "GENERAL", "rules": {"required_sections":[]}},
+            {"name": "通知", "code": "NOTICE", "rules": {"page_margins": common_margins, "dept_name": dept_name, "template": [
+                red_header, doc_number, red_line, title_section, recipient_line,
+                {"type": "body", "text": "【正文】", "font": "仿宋_GB2312", "size": 16, "first_line_indent": 32, "line_spacing": 28, "space_after": 8},
+                signature, date_line, cc_line,
+            ]}},
+            {"name": "请示", "code": "REQUEST", "rules": {"page_margins": common_margins, "dept_name": dept_name, "template": [
+                red_header, doc_number, red_line, title_section, recipient_line,
+                {"type": "body", "text": "【正文】", "font": "仿宋_GB2312", "size": 16, "first_line_indent": 32, "line_spacing": 28, "space_after": 8},
+                {"type": "ending", "text": "妥否，请批示。", "font": "仿宋_GB2312", "size": 16, "space_after": 12},
+                {"type": "paragraph", "text": "（联系人：【联系人】　联系电话：【联系电话】）", "font": "仿宋_GB2312", "size": 14, "space_after": 12, "condition": "has_attachments"},
+                signature, date_line, cc_line,
+            ]}},
+            {"name": "报告", "code": "REPORT", "rules": {"page_margins": common_margins, "dept_name": dept_name, "template": [
+                red_header, doc_number, red_line, title_section, recipient_line,
+                {"type": "body", "text": "【正文】", "font": "仿宋_GB2312", "size": 16, "first_line_indent": 32, "line_spacing": 28, "space_after": 8},
+                signature, date_line, cc_line,
+            ]}},
+            {"name": "批复", "code": "REPLY", "rules": {"page_margins": common_margins, "dept_name": dept_name, "template": [
+                red_header, doc_number, red_line, title_section, recipient_line,
+                {"type": "body", "text": "【正文】", "font": "仿宋_GB2312", "size": 16, "first_line_indent": 32, "line_spacing": 28, "space_after": 8},
+                signature, date_line, cc_line,
+            ]}},
+            {"name": "函", "code": "LETTER", "rules": {"page_margins": common_margins, "dept_name": dept_name, "template": [
+                red_header, doc_number, red_line, title_section, recipient_line,
+                {"type": "body", "text": "【正文】", "font": "仿宋_GB2312", "size": 16, "first_line_indent": 32, "line_spacing": 28, "space_after": 8},
+                {"type": "paragraph", "text": "（联系人：【联系人】　联系电话：【联系电话】）", "font": "仿宋_GB2312", "size": 14, "space_before": 8},
+                signature, date_line, cc_line,
+            ]}},
+            {"name": "纪要", "code": "MINUTES", "rules": {"page_margins": common_margins, "dept_name": dept_name, "template": [
+                title_section,
+                {"type": "body", "text": "【正文】", "font": "仿宋_GB2312", "size": 16, "first_line_indent": 32, "line_spacing": 28, "space_after": 8},
+                {"type": "paragraph", "text": "出席：【主送机关】", "font": "仿宋_GB2312", "size": 16, "space_after": 4, "condition": "has_recipient"},
+                {"type": "paragraph", "text": "抄送：【抄送机关】", "font": "仿宋_GB2312", "size": 14, "space_after": 4, "condition": "has_cc"},
+            ]}},
+            {"name": "调研分析", "code": "RESEARCH", "rules": {"page_margins": common_margins, "dept_name": dept_name, "template": [
+                title_section, recipient_line,
+                {"type": "body", "text": "【正文】", "font": "仿宋_GB2312", "size": 16, "first_line_indent": 32, "line_spacing": 28, "space_after": 8},
+                signature, date_line,
+            ]}},
+            {"name": "经济信息", "code": "ECONOMIC_INFO", "rules": {"page_margins": common_margins, "dept_name": dept_name, "template": [
+                title_section, recipient_line,
+                {"type": "body", "text": "【正文】", "font": "仿宋_GB2312", "size": 16, "first_line_indent": 32, "line_spacing": 28, "space_after": 8},
+                signature, date_line,
+            ]}},
+            {"name": "通用文档", "code": "GENERAL", "rules": {}},
         ]
         type_map = {}
         for dt in doc_types:

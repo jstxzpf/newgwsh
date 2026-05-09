@@ -109,7 +109,8 @@ async def get_dashboard_stats(current_user: SystemUser = Depends(get_current_use
 
 @router.post("/init")
 async def init_document(req: DocumentInitRequest, current_user: SystemUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    doc_id = await DocumentService.init_document(db, req.title, req.doc_type_id, current_user.user_id, current_user.dept_id)
+    doc_id = await DocumentService.init_document(db, req.title, req.doc_type_id, current_user.user_id, current_user.dept_id,
+                                                req.recipient, req.cc_list, req.document_number)
     await db.commit()
     return {"code": 200, "message": "success", "data": {"doc_id": doc_id}}
 
@@ -139,7 +140,10 @@ async def get_document(doc_id: str, current_user: SystemUser = Depends(get_curre
             "creator_name": row.full_name,
             "ai_polished_content": doc.ai_polished_content,
             "draft_suggestion": doc.draft_suggestion,
-            "word_output_path": doc.word_output_path
+            "word_output_path": doc.word_output_path,
+            "recipient": doc.recipient,
+            "cc_list": doc.cc_list,
+            "document_number": doc.document_number
         }
     }
 
@@ -152,7 +156,8 @@ async def auto_save(doc_id: str, req: AutoSaveRequest, current_user: SystemUser 
     if doc.status != "DRAFTING":
         raise BusinessException(409, "当前状态不可保存")
         
-    await DocumentService.auto_save_draft(db, doc, req.title, req.content, req.draft_content)
+    await DocumentService.auto_save_draft(db, doc, req.title, req.content, req.draft_content,
+                                          req.recipient, req.cc_list, req.document_number)
     await db.commit()
     return {"code": 200, "message": "success", "data": None}
 
