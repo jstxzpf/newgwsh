@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { apiClient } from '../api/client';
 import { useEditorStore } from '../stores/editorStore';
-import { message } from 'antd';
 
 export function useLockGuard(docId: string | null) {
   const lockTokenRef = useRef<string | null>(null);

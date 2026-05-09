@@ -23,10 +23,6 @@ class AuthService:
         await db.execute(delete(UserSession).where(UserSession.session_id == session_id))
 
     @staticmethod
-    async def clear_all_user_sessions(db: AsyncSession, user_id: int):
-        await db.execute(delete(UserSession).where(UserSession.user_id == user_id))
-
-    @staticmethod
     async def create_session(db: AsyncSession, user_id: int, refresh_token_hash: str) -> str:
         session_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).replace(tzinfo=None)

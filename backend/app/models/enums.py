@@ -22,17 +22,6 @@ class KBTypeEnum(str, enum.Enum):
     FILE = "FILE"
     DIRECTORY = "DIRECTORY"
 
-class DocTypeEnum(str, enum.Enum):
-    NOTICE = "NOTICE"
-    REQUEST = "REQUEST"
-    REPORT = "REPORT"
-    REPLY = "REPLY"
-    LETTER = "LETTER"
-    MINUTES = "MINUTES"
-    RESEARCH = "RESEARCH"
-    ECONOMIC_INFO = "ECONOMIC_INFO"
-    GENERAL = "GENERAL"
-
 class TaskType(str, enum.Enum):
     POLISH = "POLISH"
     FORMAT = "FORMAT"

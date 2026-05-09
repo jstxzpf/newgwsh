@@ -104,10 +104,6 @@ async def logout(
     current_user: SystemUser = Depends(get_current_user), 
     db: AsyncSession = Depends(get_db)
 ):
-    from app.api.dependencies import oauth2_scheme
-    from jose import jwt
-    from app.core.config import settings
-
     # 获取当前请求的 session_id 并仅清除该 session
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):

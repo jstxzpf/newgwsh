@@ -130,7 +130,7 @@ export const Workspace: React.FC = () => {
     if (!doc_id || isReadOnly || isBusy) return;
 
     const autoSave = async () => {
-      const payload: any = { title: undefined };
+      const payload: any = {};
       if (viewMode === 'SINGLE') {
         payload.content = content;
       } else {

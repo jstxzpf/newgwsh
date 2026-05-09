@@ -4,10 +4,6 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
-class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
 class UserInfoResponse(BaseModel):
     user_id: int
     username: str

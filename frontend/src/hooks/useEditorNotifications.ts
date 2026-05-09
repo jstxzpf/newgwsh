@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { apiClient } from '../api/client';
+import { useAuthStore } from '../stores/authStore';
 import { useEditorStore } from '../stores/editorStore';
-import { Modal, message } from 'antd';
+import { Modal, message, notification } from 'antd';
 
 export function useEditorNotifications() {
   const token = useAuthStore(state => state.token);
@@ -72,5 +73,3 @@ export function useEditorNotifications() {
   }, [token]);
 }
 
-import { useAuthStore } from '../stores/authStore';
-import { notification } from 'antd';

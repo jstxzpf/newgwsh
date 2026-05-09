@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Layout, Input, List, Avatar, Typography, Space, Button, Card, Empty, Tooltip, Tag, Divider } from 'antd';
+import { Layout, Input, Avatar, Typography, Space, Button, Empty, Tooltip, Tag, Divider } from 'antd';
 import { SendOutlined, UserOutlined, RobotOutlined, DeploymentUnitOutlined, BookOutlined } from '@ant-design/icons';
 import { VirtualDocTree } from '../Workspace/components/VirtualDocTree';
 import { useAuthStore } from '../../stores/authStore';

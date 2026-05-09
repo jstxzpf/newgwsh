@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, List, Card, Typography, Button, Space, Badge, Modal, Input, message, Empty, Divider, Popconfirm, Tabs } from 'antd';
+import { Layout, List, Typography, Button, Space, Badge, Modal, Input, message, Empty, Divider, Tabs } from 'antd';
 import {
   InboxOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
-  FileSearchOutlined,
   SafetyCertificateOutlined,
   SendOutlined
 } from '@ant-design/icons';

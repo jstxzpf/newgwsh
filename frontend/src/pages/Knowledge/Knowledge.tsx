@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Tabs, Card, Table, Tag, Button, Space, Typography, Breadcrumb, Modal, Upload, message, Tooltip, Drawer, Form, Select, Input } from 'antd';
+import { Tabs, Card, Table, Tag, Button, Space, Typography, Breadcrumb, Modal, Upload, message, Tooltip, Drawer, Form, Select, Badge } from 'antd';
 import {
   FolderOutlined,
   FileTextOutlined,
@@ -13,9 +13,6 @@ import {
 } from '@ant-design/icons';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
-import { KBTier, DataSecurityLevel } from '../../types/enums'; // 假设已定义
-
-const { Content, Sider } = Layout;
 const { Title, Text } = Typography;
 
 export const Knowledge: React.FC = () => {
@@ -215,5 +212,3 @@ const UploadDrawer: React.FC<{ visible: boolean; onClose: () => void; tier: stri
     </Drawer>
   );
 };
-
-import { Badge } from 'antd';

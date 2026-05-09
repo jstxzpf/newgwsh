@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Table, Tag, Button, Space, Modal, message, Card, Typography, Input, Select, Badge } from 'antd';
+import { Table, Tag, Button, Space, Modal, message, Card, Typography, Input, Select } from 'antd';
 import {
   FileTextOutlined,
-  UploadOutlined,
   DeleteOutlined,
-  HistoryOutlined,
   SearchOutlined,
   EditOutlined
 } from '@ant-design/icons';

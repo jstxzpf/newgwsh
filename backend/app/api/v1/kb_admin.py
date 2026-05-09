@@ -7,7 +7,7 @@ from app.models.knowledge import KnowledgeBaseHierarchy, KnowledgePhysicalFile
 from app.models.enums import KBTier, DataSecurityLevel
 from app.api.dependencies import get_current_user
 from app.services.knowledge_service import KnowledgeService
-import time
+from app.core.exceptions import BusinessException
 from typing import List, Dict
 
 router = APIRouter()
@@ -162,6 +162,3 @@ async def reparse_kb_node(kb_id: int, current_user: SystemUser = Depends(get_cur
     process_parse_task.delay(kb_id)
 
     return {"code": 202, "message": "重新解析任务已派发", "data": {"kb_id": kb_id}}
-
-
-from app.core.exceptions import BusinessException

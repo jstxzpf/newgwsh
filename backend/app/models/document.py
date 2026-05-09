@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, Index
+from sqlalchemy import Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, validates, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB

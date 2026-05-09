@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, Index, func, BIGINT, text
+from sqlalchemy import Integer, String, Boolean, DateTime, ForeignKey, Text, Enum as SQLEnum, Index, func, BIGINT, text
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector

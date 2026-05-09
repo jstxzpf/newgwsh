@@ -4,7 +4,6 @@ from sqlalchemy import select, update, func
 from app.core.database import get_db
 from app.models.user import SystemUser
 from app.models.system import UserNotification
-from app.core.exceptions import BusinessException
 from app.api.dependencies import get_current_user
 
 router = APIRouter()

@@ -50,7 +50,6 @@ export const Login: React.FC = () => {
         <Form
           name="login"
           size="large"
-          initialValues={{ remember: true }}
           onFinish={onFinish}
           autoComplete="off"
           layout="vertical"

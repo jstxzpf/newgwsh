@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 
 class DocumentInitRequest(BaseModel):
     title: str = "未命名公文"

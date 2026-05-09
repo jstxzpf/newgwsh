@@ -95,6 +95,7 @@ audit_report_*.json
 debug_page.json
 login_debug.json
 login_dom.txt
+.playwright-mcp/
 
 # --- Test Data ---
 test_exemplar.docx
